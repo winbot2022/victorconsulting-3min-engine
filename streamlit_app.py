@@ -202,20 +202,36 @@ FONT_PATH_IN_USE = setup_japanese_font()
 st.markdown(
     f"""
 <style>
-.stApp {{ background: {BRAND_BG}; }}
-.block-container {{ padding-top: 2.8rem; }}
-h1 {{ margin-top: .6rem; }}
-.result-card {{
-  background: white; border-radius: 14px; padding: 1.0rem 1.0rem;
-  box-shadow: 0 6px 20px rgba(0,0,0,.06); border: 1px solid rgba(0,0,0,.06);
-}}
-.badge {{ display:inline-block; padding:.25rem .6rem; border-radius:999px; font-size:.9rem;
-  font-weight:700; letter-spacing:.02em; margin-left:.5rem; }}
-.badge-blue  {{ background:#e6f0ff; color:#0b5fff; border:1px solid #cfe3ff; }}
-.badge-yellow{{ background:#fff6d8; color:#8a6d00; border:1px solid #ffecb3; }}
-.badge-red   {{ background:#ffe6e6; color:#a80000; border:1px solid #ffc7c7; }}
-.small-note {{ color:#666; font-size:.9rem; }}
-hr {{ border:none; border-top:1px dotted #c9d7d7; margin:1.0rem 0; }}
+.portal-card{
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-start;
+  min-height:240px;
+  padding:14px 16px;
+  border-radius:14px;
+  background:#ffffff;
+  box-shadow:0 6px 20px rgba(0,0,0,.06);
+  border:1px solid rgba(0,0,0,.06);
+}
+.portal-lead{
+  margin:.25rem 0 .75rem;
+  line-height:1.6;
+  color:#333;
+  font-size:.95rem;
+  flex:1;
+}
+.portal-card .stLinkButton, 
+.portal-card .stButton{
+  margin-top:auto;
+}
+.portal-title{
+  display:inline-block;
+  line-height:1.25;
+}
+.badge-soon{
+  display:inline-block; padding:.2rem .6rem; border-radius:999px;
+  background:#fff6d8; color:#8a6d00; border:1px solid #ffecb3; font-weight:700;
+}
 </style>
 """,
     unsafe_allow_html=True
