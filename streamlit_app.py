@@ -67,9 +67,9 @@ DIAG_MENU = [
     {
         "key": "succession",
         "emoji": "🧭",
-        "title": "事業承継準備度診断（準備中）",
-        "lead": "ガバナンス・資本・人・税の4視点で“今からできること”を提示。",
-        "available": False,
+        "title": "事業承継準備度診断",
+        "lead":  "後継者・資本・ガバナンス・関係者・ライフの5視点で“詰まり”を特定。",
+        "available": True,
     },
 ]
 
