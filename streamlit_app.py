@@ -249,11 +249,12 @@ def render_portal():
         if logo_path:
             st.image(logo_path, width=150)
         st.markdown("### 診断メニュー")
-        st.markdown("- 3分・無料・数値非公開\n- PDF出力・AIコメント\n- Google Sheets自動保存（社内共有可）")
+        st.markdown("- 3分・無料・数値非公開\n- PDF出力・AIコメント")
         st.caption("© Victor Consulting")
 
     # ヒーロー
-    st.markdown(f"<div class='portal-hero'><h1>{PORTAL_TITLE}</h1></div>", unsafe_allow_html=True)
+    PORTAL_TITLE_HTML = "3分診断ポータル<br/>｜ Victor Consulting"
+    st.markdown(f"<div class='portal-hero'><h1 style='line-height:1.25'>{PORTAL_TITLE_HTML}</h1></div>", unsafe_allow_html=True)
     st.caption(PORTAL_HERO)
     st.write(PORTAL_LEAD)
 
@@ -301,7 +302,7 @@ def render_portal():
     st.markdown("</div>", unsafe_allow_html=True)
 
     # 追加のブランド説明（SEOテキスト）
-    with st.expander("Victor Consultingについて / なぜ“3分診断”なのか？（SEOテキスト）"):
+    with st.expander("Victor Consultingについて / なぜ“3分診断”なのか？"):
         st.markdown("""
 **Victor Consulting** は、中小製造業・サービス業の現場実装に強みを持つ経営コンサルティング・ファームです。  
 **瞬間経営管理®** の考え方に基づき、「今、どこを直せば成果に最短でつながるか」を**3分**で示します。
