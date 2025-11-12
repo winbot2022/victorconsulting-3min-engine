@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
-# =====================================================
-# 3分診断エンジン｜Victor Consulting
-# =====================================================
-# - 複数テーマ統合（製造業診断・資金繰り改善診断）
-# - OpenAIによるAIコメント生成
-# - PDFレポート出力
-# - URLパラメータでテーマ選択（?theme=factory / ?theme=cashflow）
-# =====================================================
-
-import os, io, json, time, base64, tempfile, re
+# ============================================================================
+# Victor Consulting ｜3分診断エンジン（Factory & Cashflow版）
+#  - Streamlit Multi-theme App
+#  - 各テーマ共通：UTM取得、OpenAIコメント、PDF出力、Sheets保存、二重書込防止
+#  - 直リンク（?theme=factory / ?theme=cashflow）対応
+#  - シートはテーマごとに分割（factory / cashflow）
+# ============================================================================
+import os, io, re, json, time, base64, tempfile, requests
 from datetime import datetime, timedelta, timezone
 import streamlit as st
 import pandas as pd
@@ -23,255 +21,297 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase.pdfmetrics import registerFontFamily
 from matplotlib import font_manager
 from PIL import Image as PILImage
-import qrcode, requests, gspread
+import qrcode
+import gspread
 from google.oauth2.service_account import Credentials
 
-# =====================================================
-# 共通設定
-# =====================================================
+# ========== 共通ブランド設定 ==========
 BRAND_BG   = "#f0f7f7"
 LOGO_URL   = "https://victorconsulting.jp/wp-content/uploads/2025/10/CImark.png"
 CTA_URL    = "https://victorconsulting.jp/spot-diagnosis/"
 OPENAI_MODEL = "gpt-4o-mini"
-APP_VERSION  = "v2.5.0"
+APP_VERSION  = "vc-multi-v1.0.0"
 JST = timezone(timedelta(hours=9))
-THEME_SLUGS = {"factory": "製造業診断", "cashflow": "資金繰り改善診断"}
-SLUG_BY_NAME = {v: k for k, v in THEME_SLUGS.items()}
 
-st.set_page_config(page_title="3分診断エンジン｜Victor Consulting", page_icon="✅", layout="centered")
+# ========== Streamlit 基本設定 ==========
+st.set_page_config(
+    page_title="3分診断エンジン｜Victor Consulting",
+    page_icon="🧭",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
 
-# =====================================================
-# 汎用関数
-# =====================================================
-def read_secret(key, default=None):
+# ========== Secrets & Admin ==========
+def read_secret(key: str, default=None):
     try:
         return st.secrets[key]
     except Exception:
         return os.environ.get(key, default)
 
-def setup_font():
-    font_path = "NotoSansJP-Regular.ttf"
-    if os.path.exists(font_path):
+try:
+    qp = st.query_params
+except Exception:
+    qp = st.experimental_get_query_params()
+ADMIN_MODE = (str(qp.get("admin", ["0"])[0]) == "1") or (str(read_secret("ADMIN_MODE", "0")) == "1")
+
+# ========== 日本語フォント設定 ==========
+def setup_japanese_font():
+    candidates = ["NotoSansJP-Regular.ttf", "/mnt/data/NotoSansJP-Regular.ttf"]
+    font_path = next((p for p in candidates if os.path.exists(p)), None)
+    if font_path:
         pdfmetrics.registerFont(TTFont("JP", font_path))
-        registerFontFamily("JP", normal="JP", bold="JP", italic="JP", boldItalic="JP")
+        registerFontFamily("JP", normal="JP", bold="JP")
         font_manager.fontManager.addfont(font_path)
-setup_font()
-
-def path_or_download_logo() -> str:
-    local = "CImark.png"
-    if os.path.exists(local):
-        return local
-    try:
-        r = requests.get(LOGO_URL, timeout=8)
-        if r.ok:
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-            tmp.write(r.content)
-            tmp.flush()
-            return tmp.name
-    except Exception:
-        pass
+        import matplotlib as mpl
+        mpl.rcParams["font.family"] = "JP"
+        mpl.rcParams["axes.unicode_minus"] = False
+        return font_path
     return None
+FONT_PATH_IN_USE = setup_japanese_font()
 
-def build_qr_png(url: str):
-    img = qrcode.make(url)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return buf.read()
+# ========== CSS ==========
+st.markdown(f"""
+<style>
+.stApp {{ background: {BRAND_BG}; }}
+.block-container {{ padding-top: 2.8rem; }}
+.result-card {{
+  background: white; border-radius: 14px; padding: 1.0rem;
+  box-shadow: 0 6px 20px rgba(0,0,0,.06); border: 1px solid rgba(0,0,0,.06);
+}}
+.badge {{ padding:.25rem .6rem; border-radius:999px; font-weight:700; }}
+.badge-blue  {{ background:#e6f0ff; color:#0b5fff; }}
+.badge-yellow{{ background:#fff6d8; color:#8a6d00; }}
+.badge-red   {{ background:#ffe6e6; color:#a80000; }}
+</style>
+""", unsafe_allow_html=True)
 
-def build_bar_png(df: pd.DataFrame):
-    fig, ax = plt.subplots(figsize=(5,2.5), dpi=220)
-    df_sorted = df.sort_values("平均スコア", ascending=True)
-    ax.barh(df_sorted["カテゴリ"], df_sorted["平均スコア"], color="#0077b6")
-    ax.set_xlim(0,5)
-    ax.grid(axis="x", linestyle="--", alpha=0.3)
-    buf = io.BytesIO()
-    fig.tight_layout()
-    fig.savefig(buf, format="PNG")
-    plt.close(fig)
-    buf.seek(0)
-    return buf.read()
+# ========== Google Sheets ヘルパ ==========
+HEADER_ORDER = ["timestamp","company","email","category_scores","total_score","type_label",
+                "ai_comment","utm_source","utm_campaign","pdf_url","app_version","status",
+                "ai_comment_len","risk_level","entry_check","report_date"]
 
-def make_pdf_bytes(result: dict, df: pd.DataFrame):
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=32, leftMargin=32, topMargin=28, bottomMargin=28)
-    styles = getSampleStyleSheet()
-    normal = styles["BodyText"]; h3 = styles["Heading3"]
-    normal.fontName = h3.fontName = "JP"
-    elems = []
-    logo_path = path_or_download_logo()
-    if logo_path:
-        elems.append(Image(logo_path, width=120, height=40))
-    elems.append(Spacer(1, 10))
-    elems.append(Paragraph(f"3分無料診断レポート｜{result['theme']}", styles["Title"]))
-    elems.append(Spacer(1, 6))
-    elems.append(Paragraph(f"会社名：{result['company']}　日付：{result['dt']}　信号：{result['signal']}", normal))
-    elems.append(Spacer(1, 6))
-    elems.append(Paragraph("AIコメント", h3))
-    elems.append(Paragraph(result["comment"], normal))
-    elems.append(Spacer(1, 6))
-    data = [["カテゴリ","平均スコア"]] + [[r["カテゴリ"], f"{r['平均スコア']:.2f}"] for _,r in df.iterrows()]
-    t = Table(data, colWidths=[260,100])
-    t.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.5,colors.grey)]))
-    elems.append(t)
-    elems.append(Spacer(1,8))
-    png = build_bar_png(df)
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    tmp.write(png); tmp.flush()
-    elems.append(Image(tmp.name, width=380, height=180))
-    elems.append(Spacer(1,10))
-    qr = build_qr_png(CTA_URL)
-    qtmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    qtmp.write(qr); qtmp.flush()
-    elems.append(Paragraph("次の一手：90分スポット診断のご案内", h3))
-    elems.append(Image(qtmp.name, width=60, height=60))
-    doc.build(elems)
-    buf.seek(0)
-    return buf.read()
-
-def openai_generate_comment(theme, company, main_type, df, avg):
-    api_key = read_secret("OPENAI_API_KEY")
-    if not api_key:
-        return "（AIコメント未生成：APIキー未設定）"
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key)
-    except:
-        import openai
-        openai.api_key = api_key
-        client = openai
-    worst2 = df.sort_values("平均スコア", ascending=True).head(2)["カテゴリ"].tolist()
-    prompt = f"""
-あなたはVictor Consultingの経営コンサルタントです。
-テーマ：{theme}
-会社名：{company or '（未入力）'}
-平均スコア：{avg:.2f} / 5
-信号：{"青" if avg>=4 else "黄" if avg>=2.6 else "赤"}
-弱点カテゴリTOP2：{", ".join(worst2)}
-
-上記を踏まえ、経営者向けに約300字（260〜340字）で日本語のコメントを作成。
-- 1段落で、前置き・箇条書きなし。
-- 最後の一文は信号色に応じた強度で「90分スポット診断」を勧める。
-"""
-    try:
-        resp = client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=[{"role":"system","content":"簡潔かつ実務的に。"},
-                      {"role":"user","content":prompt}],
-            temperature=0.5,
-            max_tokens=400,
-        )
-        return resp.choices[0].message.content.strip()
-    except Exception as e:
-        return f"（AIコメント生成エラー: {e}）"
-
-def auto_save_to_sheets(row, sheet_name):
-    secret_json = read_secret("GOOGLE_SERVICE_JSON")
-    sheet_id = read_secret("SPREADSHEET_ID")
-    if not secret_json or not sheet_id: return
-    creds = Credentials.from_service_account_info(json.loads(secret_json), scopes=["https://www.googleapis.com/auth/spreadsheets"])
+def get_gsheet(spreadsheet_id, service_json_str, sheet_name="responses"):
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    info = json.loads(service_json_str)
+    creds = Credentials.from_service_account_info(info, scopes=scopes)
     gc = gspread.authorize(creds)
-    sh = gc.open_by_key(sheet_id)
+    sh = gc.open_by_key(spreadsheet_id)
     try:
         ws = sh.worksheet(sheet_name)
     except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=20)
-    if not ws.get_all_values():
-        ws.append_row(list(row.keys()))
-    ws.append_row(list(row.values()))
+        ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=len(HEADER_ORDER))
+        ws.append_row(HEADER_ORDER)
+    return ws
 
-# =====================================================
-# 製造業診断
-# =====================================================
-def run_factory():
-    st.title("製造現場の“隠れたムダ”をあぶり出す｜3分無料診断")
-    st.write("**10問**に回答するだけで、貴社のリスク構造を可視化します。")
-    YN3=["Yes","部分的に","No"]
-    with st.form("factory_form"):
-        q1=st.radio("在庫基準を数値で管理していますか？",YN3)
-        q2=st.radio("在庫削減の責任部署が明確ですか？",YN3)
-        q3=st.radio("熟練者しか対応できない作業が多いですか？",YN3)
-        q4=st.radio("標準書を継続更新していますか？",YN3)
-        q5=st.radio("原価削減目標を数値で追っていますか？",YN3)
-        q6=st.radio("現場リーダーがコスト感覚を持っていますか？",YN3)
-        q7=st.radio("受注変動対応ルールがありますか？",YN3)
-        q8=st.radio("リードタイム短縮を定期見直ししていますか？",YN3)
-        q9=st.radio("進捗をリアルタイムで把握できますか？",YN3)
-        q10=st.radio("データをもとに会議を行っていますか？",YN3)
-        company=st.text_input("会社名"); email=st.text_input("メールアドレス")
-        submit=st.form_submit_button("診断する")
-    if not submit: return
-    def s(x):return {"Yes":5,"部分的に":3,"No":1}.get(x,3)
-    df=pd.DataFrame({
-        "カテゴリ":["在庫・運搬","人材・技能承継","原価意識・改善文化","生産計画・変動対応","DX・情報共有"],
-        "平均スコア":[(s(q1)+s(q2))/2,(6-s(q3)+s(q4))/2,(s(q5)+s(q6))/2,(s(q7)+s(q8))/2,(s(q9)+s(q10))/2]
-    })
-    avg=df["平均スコア"].mean()
-    sig="青" if avg>=4 else "黄" if avg>=2.6 else "赤"
-    main=df.sort_values("平均スコア").iloc[0]["カテゴリ"]
-    comment=openai_generate_comment("製造業診断",company,main,df,avg)
-    pdf=make_pdf_bytes({"theme":"製造業診断","company":company,"dt":datetime.now(JST).strftime("%Y-%m-%d %H:%M"),"signal":sig,"comment":comment},df)
-    st.download_button("📄 PDFをダウンロード",data=pdf,file_name=f"製造業診断_{company}.pdf")
-    row={"timestamp":datetime.now(JST).isoformat(),"company":company,"email":email,"avg":avg,"comment":comment}
-    auto_save_to_sheets(row,"製造業診断")
-    st.success("診断結果を保存しました。")
+def append_to_sheet(row_dict, sheet_name="responses"):
+    secret_json = read_secret("GOOGLE_SERVICE_JSON", None)
+    if not secret_json:
+        b64 = read_secret("GOOGLE_SERVICE_JSON_BASE64", None)
+        if b64: secret_json = base64.b64decode(b64).decode("utf-8")
+    secret_sheet_id = read_secret("SPREADSHEET_ID", None)
+    if not secret_json or not secret_sheet_id: return False
+    try:
+        ws = get_gsheet(secret_sheet_id, secret_json, sheet_name)
+        record = [row_dict.get(k,"") for k in HEADER_ORDER]
+        ws.append_row(record, value_input_option="USER_ENTERED")
+        return True
+    except Exception:
+        return False
 
-# =====================================================
-# 資金繰り改善診断
-# =====================================================
-def run_cashflow():
-    st.title("3分で分かる 資金繰り改善診断")
-    OPT3=["多くある","少しある","ほとんどない"]
-    FREQ=["ほとんどない","たまに","頻繁に"]
-    with st.form("cash_form"):
-        q1=st.radio("得意先からの入金が少し遅いと感じますか？",["いつも","ときどき","ほとんどない"])
-        q2=st.radio("支払い条件が厳しいと感じますか？",["Yes","No"])
-        q3=st.radio("在庫が増えていますか？",["Yes","No"])
-        q4=st.radio("固定費の負担が重いですか？",["Yes","No"])
-        q5=st.radio("倉庫に売れ残り在庫がありますか？",OPT3)
-        q6=st.radio("借入金の返済負担が重いと感じますか？",["Yes","No"])
-        q7=st.radio("銀行とはどの程度連絡を取りますか？",FREQ)
-        q8=st.radio("資金繰り表を定期的に更新していますか？",["Yes","No"])
-        q9=st.radio("キャッシュフローを数値で把握していますか？",["Yes","No"])
-        q10=st.radio("資金繰り管理を担当する人が明確ですか？",["Yes","No"])
-        company=st.text_input("会社名"); email=st.text_input("メールアドレス")
-        submit=st.form_submit_button("診断する")
-    if not submit:return
-    def yn(x):return {"Yes":5,"No":1,"いつも":5,"ときどき":3,"ほとんどない":1,"多くある":1,"少しある":3}.get(x,3)
-    df=pd.DataFrame({
-        "カテゴリ":["売上・入金管理","支払・仕入管理","在庫・固定費管理","借入・金融機関連携","資金繰り管理体制"],
-        "平均スコア":[(yn(q1)+yn(q2))/2,(yn(q2)+yn(q4))/2,(yn(q3)+yn(q5))/2,(yn(q6)+yn(q7))/2,(yn(q8)+yn(q9))/2]
-    })
-    avg=df["平均スコア"].mean()
-    sig="青" if avg>=4 else "黄" if avg>=2.6 else "赤"
-    main=df.sort_values("平均スコア").iloc[0]["カテゴリ"]
-    comment=openai_generate_comment("資金繰り改善診断",company,main,df,avg)
-    pdf=make_pdf_bytes({"theme":"資金繰り改善診断","company":company,"dt":datetime.now(JST).strftime("%Y-%m-%d %H:%M"),"signal":sig,"comment":comment},df)
-    st.download_button("📄 PDFをダウンロード",data=pdf,file_name=f"資金繰り診断_{company}.pdf")
-    row={"timestamp":datetime.now(JST).isoformat(),"company":company,"email":email,"avg":avg,"comment":comment}
-    auto_save_to_sheets(row,"資金繰り改善診断")
-    st.success("診断結果を保存しました。")
+# ========== OpenAIクライアント ==========
+def _openai_client(api_key: str):
+    try:
+        from openai import OpenAI
+        return "new", OpenAI(api_key=api_key)
+    except Exception:
+        import openai
+        openai.api_key = api_key
+        return "old", openai
 
-# =====================================================
-# ルーティング制御
-# =====================================================
-try:
-    qp=st.query_params
-except:
-    qp=st.experimental_get_query_params()
-param=(qp.get("theme") or [""])[0].lower()
-if param=="factory":
-    run_factory()
-elif param=="cashflow":
-    run_cashflow()
-else:
+# ========== 共通PDF作成 ==========
+def make_pdf_bytes(result, df_scores, brand_hex=BRAND_BG):
+    from reportlab.lib.units import mm
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+        rightMargin=30,leftMargin=30,topMargin=25,bottomMargin=25)
+    styles = getSampleStyleSheet(); normal=styles["BodyText"]; title=styles["Title"]
+    if FONT_PATH_IN_USE:
+        title.fontName = normal.fontName = "JP"
+    normal.fontSize = 10
+    elems = []
+    try:
+        resp = requests.get(LOGO_URL,timeout=6)
+        tmp = tempfile.NamedTemporaryFile(delete=False,suffix=".png")
+        tmp.write(resp.content); tmp.flush()
+        elems.append(Image(tmp.name,width=120))
+    except: pass
+    elems.append(Paragraph("3分無料診断レポート", title))
+    elems.append(Spacer(1,8))
+    meta = f"会社名：{result['company']} ／ 日時：{result['dt']} ／ 信号：{result['signal']} ／ タイプ：{result['main_type']}"
+    elems.append(Paragraph(meta, normal)); elems.append(Spacer(1,6))
+    elems.append(Paragraph("診断コメント", styles["Heading3"]))
+    elems.append(Paragraph(result["comment"], normal))
+    elems.append(Spacer(1,6))
+    data = [["カテゴリ","平均スコア"]] + [[r["カテゴリ"], f"{r['平均スコア']:.2f}"] for _,r in df_scores.iterrows()]
+    t=Table(data, colWidths=[220,120])
+    t.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.3,colors.grey)]))
+    elems.append(t)
+    doc.build(elems); buf.seek(0)
+    return buf.read()
+
+# ========== 共通関数 ==========
+def validate_inputs(company,email):
+    if not company.strip(): return False,"会社名は必須です。"
+    if not re.match(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$",email): return False,"メール形式が正しくありません。"
+    return True,""
+
+def to_risk_level(total: float):
+    if total<2.0: return "高リスク"
+    elif total<3.5: return "中リスク"
+    else: return "低リスク"
+
+# =============================================================================
+# ▼▼▼ メイン：テーマ切替（製造業・資金繰り） ▼▼▼
+# =============================================================================
+theme = qp.get("theme", [""])[0] if isinstance(qp.get("theme"), list) else qp.get("theme","")
+
+if not theme:
     st.title("3分診断エンジン｜Victor Consulting")
-    st.markdown("""
-    経営課題を“瞬間で見える化”する自己診断ツール。  
-    以下のテーマを選んでください。
-    - 🏭 [製造業診断](?theme=factory)
-    - 💴 [資金繰り改善診断](?theme=cashflow)
-    """)
+    st.write("気になるテーマを選択してください。")
+    st.markdown("### 🔧 診断メニュー")
+    st.markdown("- [🏭 製造業向け 経営診断](?theme=factory)")
+    st.markdown("- [💴 資金繰り改善診断](?theme=cashflow)")
+    st.info("URL直アクセスも可能です。例：`...?theme=cashflow`")
+    st.stop()
+
+# =============================================================================
+# テーマ1️⃣ 製造業向け
+# =============================================================================
+if theme=="factory":
+    st.title("🏭 3分で分かる 製造業経営診断")
+    st.write("10問に答えるだけで、工場経営の重点改善ポイントを可視化します。")
+
+    YN3 = ["Yes","部分的に","No"]
+    with st.form("factory_form"):
+        st.subheader("① 生産・在庫管理")
+        q1=st.radio("Q1. 生産計画と実績を毎月確認していますか？", YN3, index=1)
+        q2=st.radio("Q2. 在庫量を定量的に管理していますか？", YN3, index=1)
+        st.subheader("② 原価・収益管理")
+        q3=st.radio("Q3. 製品ごとの利益率を把握していますか？", YN3, index=1)
+        q4=st.radio("Q4. 価格改定の検討を定期的に行っていますか？", YN3, index=1)
+        st.subheader("③ 設備・人材")
+        q5=st.radio("Q5. 設備稼働率を把握していますか？", YN3, index=1)
+        q6=st.radio("Q6. 技能承継や多能工化の仕組みがありますか？", YN3, index=1)
+        st.subheader("④ 取引・顧客関係")
+        q7=st.radio("Q7. 主要取引先との依存度を把握していますか？", YN3, index=1)
+        q8=st.radio("Q8. 新規顧客の開拓活動を行っていますか？", YN3, index=1)
+        st.subheader("⑤ 経営基盤")
+        q9=st.radio("Q9. 中期経営計画を策定していますか？", YN3, index=2)
+        q10=st.radio("Q10. 経営会議でデータを活用した議論を行っていますか？", YN3, index=2)
+        company=st.text_input("会社名（必須）")
+        email=st.text_input("メールアドレス（必須）")
+        submitted=st.form_submit_button("診断する")
+
+    if submitted:
+        ok,msg=validate_inputs(company,email)
+        if not ok: st.error(msg); st.stop()
+        mapper={"Yes":5,"部分的に":3,"No":1}
+        scores=[mapper[q] for q in [q1,q2,q3,q4,q5,q6,q7,q8,q9,q10]]
+        df=pd.DataFrame({"カテゴリ":[
+            "生産・在庫","原価・収益","設備・人材","取引・顧客","経営基盤"],
+            "平均スコア":[sum(scores[0:2])/2,sum(scores[2:4])/2,sum(scores[4:6])/2,sum(scores[6:8])/2,sum(scores[8:10])/2]})
+        overall=df["平均スコア"].mean()
+        signal="青" if overall>=4 else("黄" if overall>=2.6 else "赤")
+        main_type="生産効率型" if df["平均スコア"].idxmin()==0 else "営業・原価改善型"
+        comment=f"全体平均{overall:.2f}点。{main_type}の傾向です。"
+        result={"company":company,"dt":datetime.now(JST).strftime("%Y-%m-%d %H:%M"),
+                "signal":signal,"main_type":main_type,"comment":comment}
+        st.markdown(f"### タイプ判定：{main_type}　({signal}信号)")
+        st.dataframe(df)
+        st.download_button("📄 PDFをダウンロード",
+            data=make_pdf_bytes(result,df),file_name="factory.pdf",mime="application/pdf")
+        row={"timestamp":datetime.now(JST).isoformat(),"company":company,"email":email,
+             "category_scores":json.dumps(df.to_dict(),ensure_ascii=False),"total_score":f"{overall:.2f}",
+             "type_label":main_type,"ai_comment":comment,"utm_source":"","utm_campaign":"",
+             "pdf_url":"","app_version":APP_VERSION,"status":"ok","ai_comment_len":len(comment),
+             "risk_level":to_risk_level(overall),"entry_check":"OK","report_date":datetime.now(JST).strftime("%Y-%m-%d")}
+        append_to_sheet(row,"factory")
+
+# =============================================================================
+# テーマ2️⃣ 資金繰り改善診断
+# =============================================================================
+elif theme=="cashflow":
+    st.title("💴 3分で分かる 資金繰り改善診断")
+    st.write("10問に答えるだけで、資金繰りの“詰まりどころ”を可視化します。")
+
+    YN3=["Yes","部分的に","No"]
+    THREE_USUAL=["いつも","ときどき","ほとんどない"]
+    THREE_BANK=["ほとんどない","たまに","頻繁に"]
+    THREE_STOCK=["多くある","少しある","ほとんどない"]
+
+    def to_score(ans,mapping,invert=False):
+        v=mapping.get(ans,3); return {5:1,3:3,1:5}[v] if invert else v
+
+    MAP_USUAL={"いつも":1,"ときどき":3,"ほとんどない":5}
+    MAP_BANK={"ほとんどない":1,"たまに":3,"頻繁に":5}
+    MAP_STOCK={"多くある":1,"少しある":3,"ほとんどない":5}
+    MAP_YN3={"Yes":5,"部分的に":3,"No":1}
+
+    with st.form("cash_form"):
+        st.subheader("① 売上・入金管理")
+        q1=st.radio("Q1. 得意先からの入金が「少し遅い」と感じることがありますか？",THREE_USUAL,index=1)
+        q2=st.radio("Q2. 請求書発行から入金までの流れを定期的に点検・改善していますか？",YN3,index=1)
+        st.subheader("② 支払・仕入管理")
+        q3=st.radio("Q3. 支払条件（サイト）は自社の資金繰りを考慮して設計できていますか？",YN3,index=1)
+        q4=st.radio("Q4. 外注費や仕入先への支払予定を月次で見通せていますか？",YN3,index=1)
+        st.subheader("③ 在庫・固定費管理")
+        q5=st.radio("Q5. 倉庫や事業所に「売れ残り在庫」がありますか？",THREE_STOCK,index=1)
+        q6=st.radio("Q6. 固定費を季節変動を加味して予実管理できていますか？",YN3,index=1)
+        st.subheader("④ 借入・金融機関連携")
+        q7=st.radio("Q7. 銀行とはどの程度の頻度で連絡を取り合いますか？",THREE_BANK,index=1)
+        q8=st.radio("Q8. 借入金の返済計画や金利条件を把握し見直していますか？",YN3,index=1)
+        st.subheader("⑤ 資金繰り管理体制")
+        q9=st.radio("Q9. 短期の資金繰り表を運用していますか？",YN3,index=2)
+        q10=st.radio("Q10. 資金不足が見込まれる場合の対応ルールは定めていますか？",YN3,index=1)
+        company=st.text_input("会社名（必須）")
+        email=st.text_input("メールアドレス（必須）")
+        submitted=st.form_submit_button("診断する")
+
+    if submitted:
+        ok,msg=validate_inputs(company,email)
+        if not ok: st.error(msg); st.stop()
+        df=pd.DataFrame({
+            "カテゴリ":["売上・入金管理","支払・仕入管理","在庫・固定費管理","借入・金融機関連携","資金繰り管理体制"],
+            "平均スコア":[
+                (to_score(q1,MAP_USUAL)+to_score(q2,MAP_YN3))/2,
+                (to_score(q3,MAP_YN3)+to_score(q4,MAP_YN3))/2,
+                (to_score(q5,MAP_STOCK)+to_score(q6,MAP_YN3))/2,
+                (to_score(q7,MAP_BANK)+to_score(q8,MAP_YN3))/2,
+                (to_score(q9,MAP_YN3)+to_score(q10,MAP_YN3))/2
+            ]})
+        overall=df["平均スコア"].mean()
+        signal="青" if overall>=4 else("黄" if overall>=2.6 else "赤")
+        worst=df.sort_values("平均スコア").iloc[0]["カテゴリ"]
+        main_type={"売上・入金管理":"売上依存型","支払・仕入管理":"支払圧迫型",
+                   "在庫・固定費管理":"在庫・固定費過多型","借入・金融機関連携":"金融連携不足型",
+                   "資金繰り管理体制":"体制未整備型"}[worst]
+        comment=f"{main_type}傾向。平均{overall:.2f}点。"
+
+        st.markdown(f"### タイプ判定：{main_type}（{signal}信号）")
+        st.dataframe(df)
+
+        pdf_bytes=make_pdf_bytes(
+            {"company":company,"dt":datetime.now(JST).strftime('%Y-%m-%d %H:%M'),
+             "signal":signal,"main_type":main_type,"comment":comment},df)
+        st.download_button("📄 PDFをダウンロード",data=pdf_bytes,file_name="cashflow.pdf",mime="application/pdf")
+
+        row={"timestamp":datetime.now(JST).isoformat(),"company":company,"email":email,
+             "category_scores":json.dumps(df.to_dict(),ensure_ascii=False),"total_score":f"{overall:.2f}",
+             "type_label":main_type,"ai_comment":comment,"utm_source":"","utm_campaign":"",
+             "pdf_url":"","app_version":APP_VERSION,"status":"ok","ai_comment_len":len(comment),
+             "risk_level":to_risk_level(overall),"entry_check":"OK","report_date":datetime.now(JST).strftime("%Y-%m-%d")}
+        append_to_sheet(row,"cashflow")
+
 
 
 
