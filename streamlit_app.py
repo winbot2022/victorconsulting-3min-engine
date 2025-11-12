@@ -43,6 +43,57 @@ CTA_URL    = "https://victorconsulting.jp/spot-diagnosis/"
 OPENAI_MODEL = "gpt-4o-mini"
 APP_VERSION  = "engine-v1.0.0"
 
+# ========= ポータル（ブランドページ）設定 =========
+PORTAL_TITLE = "3分診断ポータル｜Victor Consulting"
+PORTAL_HERO  = "現場とお金の“いま”を、3分で見える化。"
+PORTAL_LEAD  = "機密数値は不要。Yes/Noや2〜3段階の簡易回答だけで、“次の一手”まで示します。"
+
+# カード定義（順番＝表示順）
+DIAG_MENU = [
+    {
+        "key": "factory",
+        "emoji": "🏭",
+        "title": "製造現場の隠れたムダ診断",
+        "lead": "工程・段取り・仕掛・在庫の“詰まり”を6タイプで判定。改善の打ち手に直結。",
+        "available": True,
+    },
+    {
+        "key": "cashflow",
+        "emoji": "💴",
+        "title": "資金繰り改善診断",
+        "lead": "入金サイト・在庫・回収・ファクタリング等のボトルネックを早期検知。",
+        "available": True,
+    },
+    {
+        "key": "succession",
+        "emoji": "🧭",
+        "title": "事業承継準備度診断（準備中）",
+        "lead": "ガバナンス・資本・人・税の4視点で“今からできること”を提示。",
+        "available": False,
+    },
+]
+
+def current_query_params() -> dict:
+    try:
+        q = st.query_params
+        # st.query_params は Mapping なので dict 化
+        return {k: (v[0] if isinstance(v, list) else v) for k, v in q.items()}
+    except Exception:
+        q = st.experimental_get_query_params()
+        return {k: (v[0] if isinstance(v, list) else v) for k, v in q.items()}
+
+def build_theme_url(theme_key: str, keep=["utm_source","utm_medium","utm_campaign"]) -> str:
+    base = {"theme": theme_key}
+    q = current_query_params()
+    for k in keep:
+        if q.get(k):
+            base[k] = q[k]
+    # Streamlit は相対パスにクエリを付ける形でOK
+    return "?" + "&".join([f"{k}={base[k]}" for k in base])
+
+def is_truthy(x) -> bool:
+    return str(x).strip() in ("1","true","True","yes","on")
+
 # 日本時間
 JST = timezone(timedelta(hours=9))
 
@@ -75,16 +126,30 @@ except Exception:
     qp = st.experimental_get_query_params()
 ADMIN_MODE = (str(qp.get("admin", ["0"])[0]) == "1") or (str(read_secret("ADMIN_MODE", "0")) == "1")
 
-# ========= テーマ選択 =========
-def get_theme_name() -> str:
-    try:
-        q = st.query_params
-    except Exception:
-        q = st.experimental_get_query_params()
-    theme = q.get("theme", ["factory"])[0] if isinstance(q.get("theme"), list) else q.get("theme", "factory")
-    return theme if theme in ("factory","cashflow") else "factory"
+# ========= ルーティング：ポータル or テーマ =========
+def get_route() -> dict:
+    """
+    return {"mode": "portal" | "theme", "theme": "factory" | "cashflow" | ...}
+    既定動作：
+      - ?menu=1 または ?theme=portal → ポータル
+      - ?theme が factory / cashflow のいずれか → テーマ
+      - それ以外（テーマ指定なし/未知） → ポータル（＝トップ）
+    """
+    q = current_query_params()
+    menu_flag = is_truthy(q.get("menu", "0"))
+    theme_raw = q.get("theme", "").strip().lower()
 
-THEME = get_theme_name()
+    if menu_flag or theme_raw in ("", "portal"):
+        return {"mode": "portal", "theme": None}
+
+    if theme_raw in ("factory", "cashflow"):
+        return {"mode": "theme", "theme": theme_raw}
+
+    # 将来の追加テーマが未実装でも、portal に寄せる
+    return {"mode": "portal", "theme": None}
+
+ROUTE = get_route()
+
 
 # ========= 日本語TTF 登録 =========
 def setup_japanese_font():
@@ -134,6 +199,120 @@ hr {{ border:none; border-top:1px dotted #c9d7d7; margin:1.0rem 0; }}
 """,
     unsafe_allow_html=True
 )
+
+# ========= ポータル用 追加スタイル =========
+st.markdown("""
+<style>
+.portal-hero {
+  text-align:center; padding: 1.2rem 0 0.6rem 0;
+}
+.portal-grid {
+  display:grid; grid-template-columns: repeat( auto-fit, minmax(260px, 1fr) );
+  gap: 16px; margin-top: 10px;
+}
+.portal-card {
+  background: white; border-radius: 16px; padding: 1.0rem 1.0rem;
+  box-shadow: 0 10px 24px rgba(0,0,0,.05); border: 1px solid rgba(0,0,0,.08);
+  transition: transform .08s ease, box-shadow .12s ease;
+}
+.portal-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 30px rgba(0,0,0,.08);
+}
+.portal-title {
+  font-weight: 800; font-size: 1.1rem; margin: .2rem 0 .3rem 0;
+}
+.portal-lead {
+  color:#444; font-size:.95rem; line-height:1.6;
+}
+.card-footer {
+  display:flex; justify-content:flex-end; margin-top:.6rem;
+}
+.badge-soon {
+  display:inline-block; padding:.22rem .55rem; border-radius: 999px;
+  background:#f1f1f1; color:#777; font-size:.80rem; border:1px solid #e5e5e5;
+}
+</style>
+""", unsafe_allow_html=True)
+
+def render_portal():
+    # ページ設定（タイトルだけポータル名に）
+    st.set_page_config(
+        page_title=PORTAL_TITLE,
+        page_icon="✅",
+        layout="centered",
+        initial_sidebar_state="expanded"
+    )
+
+    with st.sidebar:
+        logo_path = path_or_download_logo()
+        if logo_path:
+            st.image(logo_path, width=150)
+        st.markdown("### 診断メニュー")
+        st.markdown("- 3分・無料・数値非公開\n- PDF出力・AIコメント\n- Google Sheets自動保存（社内共有可）")
+        st.caption("© Victor Consulting")
+
+    # ヒーロー
+    st.markdown(f"<div class='portal-hero'><h1>{PORTAL_TITLE}</h1></div>", unsafe_allow_html=True)
+    st.caption(PORTAL_HERO)
+    st.write(PORTAL_LEAD)
+
+    # JSON-LD（SEO：Organization / WebSite）
+    st.markdown(f"""
+<script type="application/ld+json">
+{json.dumps({
+  "@context":"https://schema.org",
+  "@type":"WebSite",
+  "name":"Victor Consulting 3分診断ポータル",
+  "url":"https://victorconsulting.jp/",
+  "publisher": {
+    "@type":"Organization",
+    "name":"Victor Consulting",
+    "logo": {"@type":"ImageObject","url": LOGO_URL}
+  },
+  "potentialAction": {
+    "@type":"SearchAction",
+    "target":"https://victorconsulting.jp/?s={{query}}",
+    "query-input":"required name=query"
+  }
+}, ensure_ascii=False)}
+</script>
+""", unsafe_allow_html=True)
+
+    # カードグリッド
+    st.markdown("<div class='portal-grid'>", unsafe_allow_html=True)
+
+    # 3列までを想定したシンプルなループ
+    cols = st.columns(min(3, max(1, len(DIAG_MENU))))
+    for i, item in enumerate(DIAG_MENU):
+        with cols[i % len(cols)]:
+            st.markdown("<div class='portal-card'>", unsafe_allow_html=True)
+            st.markdown(f"### {item['emoji']}  <span class='portal-title'>{item['title']}</span>", unsafe_allow_html=True)
+            st.markdown(f"<div class='portal-lead'>{item['lead']}</div>", unsafe_allow_html=True)
+
+            if item["available"]:
+                href = build_theme_url(item["key"])
+                st.link_button("この診断を開く →", href)
+            else:
+                st.markdown("<div class='card-footer'><span class='badge-soon'>準備中</span></div>", unsafe_allow_html=True)
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # 追加のブランド説明（SEOテキスト）
+    with st.expander("Victor Consultingについて / なぜ“3分診断”なのか？（SEOテキスト）"):
+        st.markdown("""
+**Victor Consulting** は、中小製造業・サービス業の現場実装に強みを持つ経営コンサルティング・ファームです。  
+**瞬間経営管理®** の考え方に基づき、「今、どこを直せば成果に最短でつながるか」を**3分**で示します。
+
+- **Factory Physics / TOC / Lean** をベースに、工程・在庫・仕掛・キャッシュの流れを総合評価  
+- 数値入力は不要、Yes/Noや2〜3段階で**型**に当てはめるだけ  
+- 診断結果は**PDF**＋**AIコメント**で即時出力。社内共有と次アクション設計がスムーズ
+
+ご相談は **90分スポット診断** から。継続支援・研修メニューもご用意しています。
+""")
+
 
 # ========= ロゴ取得 =========
 def path_or_download_logo() -> str | None:
@@ -245,11 +424,16 @@ def auto_save_row(row: dict, theme_sheet: str):
         _append_csv()
         _report_event("WARN", f"Sheets保存に失敗しCSVへフォールバック: {e}", {"reason": str(e)})
 
+# ========= ルーティング：ポータル優先描画 =========
+if ROUTE["mode"] == "portal":
+    render_portal()
+    st.stop()
+
 # ========= テーマ動的ロード =========
 def load_theme_module(theme_name: str):
-    mod = importlib.import_module(f"themes.{theme_name}")
-    return mod
+    return importlib.import_module(f"themes.{theme_name}")
 
+THEME = ROUTE["theme"]  # "factory" or "cashflow"
 theme = load_theme_module(THEME)
 
 # ========= サイドバー（共通） =========
