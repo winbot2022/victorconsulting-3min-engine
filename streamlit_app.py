@@ -317,53 +317,34 @@ def render_portal():
 </script>
 """, unsafe_allow_html=True)
 
-    # カードグリッド
-    st.markdown("<div class='portal-grid'>", unsafe_allow_html=True)
-
-    # 3列までを想定したシンプルなループ
-    cols = st.columns(min(3, max(1, len(DIAG_MENU))))
-    for i, item in enumerate(DIAG_MENU):
-        with cols[i % len(cols)]:
-            st.markdown("<div class='portal-card'>", unsafe_allow_html=True)
-            st.markdown(f"### {item['emoji']}  <span class='portal-title'>{item['title']}</span>", unsafe_allow_html=True)
-            st.markdown(f"<div class='portal-lead'>{item['lead']}</div>", unsafe_allow_html=True)
-
-            if item["available"]:
-                href = build_theme_url(item["key"])
-                st.link_button("この診断を開く →", href)
-            else:
-                st.markdown("<div class='card-footer'><span class='badge-soon'>準備中</span></div>", unsafe_allow_html=True)
-
-            st.markdown("</div>", unsafe_allow_html=True)
-
-    # ★ これをそのまま貼り付け（既存の CSS 挿入ブロックを置き換え）
+    # ==== 1) CSSを先に注入（ASCIIのみ・f文字列にしない） ====
     css = """
     <style>
     .portal-card{
       display:flex;
       flex-direction:column;
       justify-content:flex-start;
-      min-height:240px;
+      min-height:240px;              /* 必要なら 220-280 で調整 */
       padding:14px 16px;
       border-radius:14px;
       background:#ffffff;
       box-shadow:0 6px 20px rgba(0,0,0,.06);
       border:1px solid rgba(0,0,0,.06);
     }
+    .portal-title{
+      display:inline-block;
+      line-height:1.25;
+    }
     .portal-lead{
       margin:.25rem 0 .75rem;
       line-height:1.6;
       color:#333;
       font-size:.95rem;
-      flex:1;
+      flex:1;                        /* 本文が余白を吸収→ボタンを下へ */
     }
     .portal-card .stLinkButton,
     .portal-card .stButton{
-      margin-top:auto;
-    }
-    .portal-title{
-      display:inline-block;
-      line-height:1.25;
+      margin-top:auto;               /* 下寄せ */
     }
     .badge-soon{
       display:inline-block; padding:.2rem .6rem; border-radius:999px;
@@ -373,6 +354,28 @@ def render_portal():
     """
     st.markdown(css, unsafe_allow_html=True)
 
+    # ==== 2) カードグリッド（st.columnsで3列） ====
+    cols = st.columns(min(3, max(1, len(DIAG_MENU))))
+    for i, item in enumerate(DIAG_MENU):
+        with cols[i % len(cols)]:
+            st.markdown("<div class='portal-card'>", unsafe_allow_html=True)
+    
+            st.markdown(
+                f"### {item['emoji']}  <span class='portal-title'>{item['title']}</span>",
+                unsafe_allow_html=True
+            )
+            st.markdown(f"<div class='portal-lead'>{item['lead']}</div>", unsafe_allow_html=True)
+    
+            if item.get("available", True):
+                href = build_theme_url(item["key"])
+                st.link_button("この診断を開く →", href)
+            else:
+                st.markdown(
+                    "<div class='card-footer'><span class='badge-soon'>準備中</span></div>",
+                    unsafe_allow_html=True
+                )
+    
+            st.markdown("</div>", unsafe_allow_html=True)
 
     # 追加のブランド説明（SEOテキスト）
     with st.expander("Victor Consultingについて / なぜ“3分診断”なのか？"):
