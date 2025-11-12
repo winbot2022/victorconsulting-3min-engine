@@ -231,6 +231,14 @@ hr {{ border:none; border-top:1px dotted #c9d7d7; margin:1.0rem 0; }}
   display:grid; grid-template-columns: repeat( auto-fit, minmax(260px, 1fr) );
   gap: 18px; margin-top: 14px;
 }}
+
+/* ★ カード全体を囲むリンク */
+.portal-card-link {{
+  text-decoration:none;
+  color:inherit;
+  display:block;
+}}
+
 .portal-card {{
   display:flex;
   flex-direction:column;
@@ -261,6 +269,14 @@ hr {{ border:none; border-top:1px dotted #c9d7d7; margin:1.0rem 0; }}
   font-size:.95rem;
   flex:1;
 }}
+
+/* CTA テキスト */
+.portal-cta {{
+  font-weight:700;
+  font-size:.9rem;
+  color:#0b5fff;
+}}
+
 .portal-card .stLinkButton,
 .portal-card .stButton {{
   margin-top:auto;
@@ -276,6 +292,7 @@ hr {{ border:none; border-top:1px dotted #c9d7d7; margin:1.0rem 0; }}
 """,
     unsafe_allow_html=True
 )
+
 
 # ========= ロゴ取得 =========
 def path_or_download_logo() -> str | None:
