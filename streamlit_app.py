@@ -342,7 +342,7 @@ def render_portal():
       display:flex;                  /* 縦に並べて */
       flex-direction:column;         /* タイトル,リード,ボタンの順 */
       justify-content:flex-start;
-      min-height:240px;              /* お好みで 220–280 の範囲で調整 */
+      min-height:240px;              /* お好みで220-280の範囲で調整 */
       padding:14px 16px;
       border-radius:14px;
       background:#ffffff;
@@ -356,13 +356,13 @@ def render_portal():
       line-height:1.6;
       color:#333;
       font-size:.95rem;
-      flex:1;                        /* ★空きはここで吸収 , 高さが揃う */
+      flex:1;                        /* 空きはここで吸収 , 高さが揃う */
     }
     
     /* ボタン(=link_button)をカード下端に寄せる */
     .portal-card .stLinkButton, 
     .portal-card .stButton{
-      margin-top:auto;               /* ★下寄せ */
+      margin-top:auto;               /* 下寄せ */
     }
     
     /* タイトルの余白を微調整（任意） */
