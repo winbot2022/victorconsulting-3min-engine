@@ -7,7 +7,7 @@
 # - テーマ切替 (?theme=factory / ?theme=cashflow)
 # - テーマごとに保存シートは responses_{theme}
 
-import os, io, re, json, time, base64, tempfile, importlib
+import os, io, re, json, time, base64, tempfile, importlib, importlib.util
 from datetime import datetime, timedelta, timezone
 from typing import Tuple, Dict, Any
 
@@ -127,25 +127,31 @@ except Exception:
 ADMIN_MODE = (str(qp.get("admin", ["0"])[0]) == "1") or (str(read_secret("ADMIN_MODE", "0")) == "1")
 
 # ========= ルーティング：ポータル or テーマ =========
+def theme_exists(theme_key: str) -> bool:
+    try:
+        return importlib.util.find_spec(f"themes.{theme_key}") is not None
+    except Exception:
+        return False
+
 def get_route() -> dict:
     """
-    return {"mode": "portal" | "theme", "theme": "factory" | "cashflow" | ...}
-    既定動作：
-      - ?menu=1 または ?theme=portal → ポータル
-      - ?theme が factory / cashflow のいずれか → テーマ
-      - それ以外（テーマ指定なし/未知） → ポータル（＝トップ）
+    return {"mode": "portal" | "theme", "theme": <slug or None>}
+    既定：
+      - ?menu=1 / ?theme=portal / テーマ未指定 → portal
+      - ?theme=<slug> で themes/<slug>.py が存在 → theme
+      - それ以外 → portal
     """
     q = current_query_params()
     menu_flag = is_truthy(q.get("menu", "0"))
-    theme_raw = q.get("theme", "").strip().lower()
+    theme_raw = (q.get("theme", "") or "").strip().lower()
 
     if menu_flag or theme_raw in ("", "portal"):
         return {"mode": "portal", "theme": None}
 
-    if theme_raw in ("factory", "cashflow"):
+    if theme_exists(theme_raw):
         return {"mode": "theme", "theme": theme_raw}
 
-    # 将来の追加テーマが未実装でも、portal に寄せる
+    # 未実装のテーマが指定されたら portal へ
     return {"mode": "portal", "theme": None}
 
 ROUTE = get_route()
