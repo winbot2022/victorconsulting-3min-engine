@@ -99,7 +99,7 @@ def render_questions(st):
     # 各カテゴリ（0-5、5が良）
     hire_scores   = [to_score_yn3(q1), to_score_yn3(q2)]
     eval_scores   = [to_score_yn3(q3), to_score_yn3(q4)]
-    grow_scores   = [to_score_freq3(q5), to_score_yn3(q6)]
+    grow_scores   = [to_score_freq3(q5, invert=True), to_score_yn3(q6)]
     work_scores   = [to_score_freq3(q7), to_score_yn3(q8)]   # ← 反転なし
     mgmt_scores   = [to_score_freq3(q9), to_score_yn3(q10)]  # ← 反転なし
 
