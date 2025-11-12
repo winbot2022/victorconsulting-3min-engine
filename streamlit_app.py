@@ -253,7 +253,7 @@ def render_portal():
         st.caption("© Victor Consulting")
 
     # ヒーロー
-    PORTAL_TITLE_HTML = "3分診断ポータル<br/>｜ Victor Consulting"
+    PORTAL_TITLE_HTML = "3分診断ポータル<br/> Victor Consulting"
     st.markdown(f"<div class='portal-hero'><h1 style='line-height:1.25'>{PORTAL_TITLE_HTML}</h1></div>", unsafe_allow_html=True)
     st.caption(PORTAL_HERO)
     st.write(PORTAL_LEAD)
