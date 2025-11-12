@@ -135,6 +135,7 @@ def get_route() -> dict:
     return {"mode": "portal", "theme": None}
 
 ROUTE = get_route()
+THEME = ROUTE["theme"]
 
 # ========= 日本語TTF 登録 =========
 def setup_japanese_font():
