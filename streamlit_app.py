@@ -342,7 +342,7 @@ def render_portal():
       display:flex;                  /* 縦に並べて */
       flex-direction:column;         /* タイトル,リード,ボタンの順 */
       justify-content:flex-start;
-      min-height:240px;              /*お好みで*/
+      min-height:240px;
       padding:14px 16px;
       border-radius:14px;
       background:#ffffff;
