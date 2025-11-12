@@ -336,11 +336,12 @@ def render_portal():
 
             st.markdown("</div>", unsafe_allow_html=True)
 
+    # ★ これをそのまま貼り付け（既存の CSS 挿入ブロックを置き換え）
+    css = """
     <style>
-    /* Grid layout is OK. Height controlled by cards */
     .portal-card{
-      display:flex;                  /* 縦に並べて */
-      flex-direction:column;         /* タイトル,リード,ボタンの順 */
+      display:flex;
+      flex-direction:column;
       justify-content:flex-start;
       min-height:240px;
       padding:14px 16px;
@@ -349,36 +350,29 @@ def render_portal():
       box-shadow:0 6px 20px rgba(0,0,0,.06);
       border:1px solid rgba(0,0,0,.06);
     }
-    
-    /* リード文は可変,ここを伸ばして“ボタンを下に押し下げる” */
     .portal-lead{
       margin:.25rem 0 .75rem;
       line-height:1.6;
       color:#333;
       font-size:.95rem;
-      flex:1;                        /* 空きはここで吸収 , 高さが揃う */
+      flex:1;
     }
-    
-    /* ボタン(=link_button)をカード下端に寄せる */
-    .portal-card .stLinkButton, 
+    .portal-card .stLinkButton,
     .portal-card .stButton{
-      margin-top:auto;               /* 下寄せ */
+      margin-top:auto;
     }
-    
-    /* タイトルの余白を微調整（任意） */
     .portal-title{
       display:inline-block;
       line-height:1.25;
     }
-    
-    /* “準備中”バッジ（任意） */
     .badge-soon{
       display:inline-block; padding:.2rem .6rem; border-radius:999px;
       background:#fff6d8; color:#8a6d00; border:1px solid #ffecb3; font-weight:700;
     }
     </style>
+    """
+    st.markdown(css, unsafe_allow_html=True)
 
-    st.markdown("</div>", unsafe_allow_html=True)
 
     # 追加のブランド説明（SEOテキスト）
     with st.expander("Victor Consultingについて / なぜ“3分診断”なのか？"):
