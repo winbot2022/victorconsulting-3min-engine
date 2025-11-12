@@ -319,6 +319,7 @@ def render_portal():
         st.markdown("- 3分・無料・数値非公開\n- PDF出力・AIコメント")
         st.caption("© Victor Consulting")
 
+    # タイトル
     title_html = "3分診断ポータル<br/>Victor Consulting"
     st.markdown(
         f"<div class='portal-hero'><h1 style='line-height:1.25'>{title_html}</h1></div>",
@@ -352,7 +353,7 @@ def render_portal():
         unsafe_allow_html=True,
     )
 
-    # 追加説明
+    # 説明テキスト
     with st.expander("Victor Consultingについて / なぜ“3分診断”なのか？"):
         st.markdown("""
 **Victor Consulting** は、中小製造業・サービス業の現場実装に強みを持つ経営コンサルティング・ファームです。  
@@ -365,32 +366,41 @@ def render_portal():
 ご相談は **90分スポット診断** から。継続支援・研修メニューもご用意しています。
 """)
 
-    # カードグリッド
+    # ▼ カードグリッド（カード全体がリンク）
     st.markdown("<div class='portal-grid'>", unsafe_allow_html=True)
     cols = st.columns(min(3, max(1, len(DIAG_MENU))))
+
     for i, item in enumerate(DIAG_MENU):
         with cols[i % len(cols)]:
-            st.markdown("<div class='portal-card'>", unsafe_allow_html=True)
-            st.markdown(
-                f"### {item['emoji']}  <span class='portal-title'>{item['title']}</span>",
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                f"<div class='portal-lead'>{item['lead']}</div>",
-                unsafe_allow_html=True,
-            )
-
             if item["available"]:
                 href = build_theme_url(item["key"])
-                st.link_button("この診断を開く →", href)
+                safe_href = href.replace("&", "&amp;")
+                card_inner = f"""
+<div class="portal-card">
+  <h3>{item['emoji']}  <span class="portal-title">{item['title']}</span></h3>
+  <div class="portal-lead">{item['lead']}</div>
+  <div class="card-footer">
+    <span class="portal-cta">この診断を開く →</span>
+  </div>
+</div>
+"""
+                html = f'<a class="portal-card-link" href="{safe_href}">{card_inner}</a>'
             else:
-                st.markdown(
-                    "<div class='card-footer'><span class='badge-soon'>準備中</span></div>",
-                    unsafe_allow_html=True,
-                )
+                card_inner = f"""
+<div class="portal-card">
+  <h3>{item['emoji']}  <span class="portal-title">{item['title']}</span></h3>
+  <div class="portal-lead">{item['lead']}</div>
+  <div class="card-footer">
+    <span class="badge-soon">準備中</span>
+  </div>
+</div>
+"""
+                html = card_inner
 
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown(html, unsafe_allow_html=True)
+
     st.markdown("</div>", unsafe_allow_html=True)
+
 
 # ========= イベント記録 =========
 def _report_event(level: str, message: str, payload: dict | None = None):
