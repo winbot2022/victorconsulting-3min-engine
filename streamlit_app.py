@@ -4,12 +4,12 @@
 # - Google Sheets 自動保存（なければ CSV）
 # - サイレント保存、二重書き込み防止（saved_once & dedup_key）
 # - 管理者モード（?admin=1 または Secrets: ADMIN_MODE="1"）でイベント確認
-# - テーマ切替 (?theme=factory / ?theme=cashflow / ?theme=succession / ?theme=retention / ?theme=productivity_office)
+# - テーマ切替 (?theme=factory など)
 # - テーマごとに保存シートは responses_{theme}
 
 import os, io, re, json, time, base64, tempfile, importlib, importlib.util
 from datetime import datetime, timedelta, timezone
-from typing import Tuple, Dict, Any
+from typing import Tuple
 
 import streamlit as st
 import pandas as pd
@@ -19,7 +19,9 @@ import matplotlib.pyplot as plt
 # PDF
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
+)
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -50,22 +52,51 @@ PORTAL_LEAD  = "機密数値は不要。Yes/Noや2〜3段階の簡易回答だ�
 
 # カード定義（順番＝表示順）
 DIAG_MENU = [
-    {"key": "factory",             "emoji": "🏭", "title": "製造現場の隠れたムダ診断",
-     "lead": "工程・段取り・仕掛・在庫の“詰まり”を6タイプで判定。改善の打ち手に直結。", "available": True},
-    {"key": "cashflow",            "emoji": "💴", "title": "資金繰り改善診断",
-     "lead": "入金サイト・在庫・回収・ファクタリング等のボトルネックを早期検知。", "available": True},
-    {"key": "succession",          "emoji": "🧭", "title": "事業承継準備度診断",
-     "lead": "後継者・資本・ガバナンス・関係者・ライフの5視点で“詰まり”を特定。", "available": True},
-    {"key": "retention",           "emoji": "👥", "title": "人材定着診断",
-     "lead": "採用・評価・育成・働き方・風土の5視点で“離職の火種”を特定。", "available": True},
-    {"key": "productivity_office", "emoji": "🗂️", "title": "オフィス生産性診断",
-     "lead": "会議・情報共有・IT活用・時間配分・連携の“詰まり”を特定。", "available": True},
-    {"key": "sales","emoji": "📈","title": "営業力改善診断","lead":  "見込み客・提案・価格・継続・運用の5視点で“詰まり”を特定。",
-    "available": True,
-},
-
+    {
+        "key": "factory",
+        "emoji": "🏭",
+        "title": "製造現場の隠れたムダ診断",
+        "lead": "工程・段取り・仕掛・在庫の“詰まり”を6タイプで判定。改善の打ち手に直結。",
+        "available": True,
+    },
+    {
+        "key": "cashflow",
+        "emoji": "💴",
+        "title": "資金繰り改善診断",
+        "lead": "入金サイト・在庫・回収・ファクタリング等のボトルネックを早期検知。",
+        "available": True,
+    },
+    {
+        "key": "succession",
+        "emoji": "🧭",
+        "title": "事業承継準備度診断",
+        "lead":  "後継者・資本・ガバナンス・関係者・ライフの5視点で“詰まり”を特定。",
+        "available": True,
+    },
+    {
+        "key": "retention",
+        "emoji": "👥",
+        "title": "人材定着診断",
+        "lead":  "採用・評価・育成・働き方・風土の5視点で“離職の火種”を特定。",
+        "available": True,
+    },
+    {
+        "key": "productivity_office",
+        "emoji": "🗂️",
+        "title": "オフィス生産性診断",
+        "lead":  "会議・情報共有・IT活用・時間配分・連携の“詰まり”を特定。",
+        "available": True,
+    },
+    {
+        "key": "sales",
+        "emoji": "📈",
+        "title": "営業力改善診断",
+        "lead":  "見込み客づくり・商談・受注・リピートの4局面で“取りこぼしポイント”を可視化。",
+        "available": True,
+    },
 ]
 
+# ========= クエリ/ルーティング系 =========
 def current_query_params() -> dict:
     try:
         q = st.query_params
@@ -74,13 +105,13 @@ def current_query_params() -> dict:
         q = st.experimental_get_query_params()
         return {k: (v[0] if isinstance(v, list) else v) for k, v in q.items()}
 
-def build_theme_url(theme_key: str, keep=["utm_source","utm_medium","utm_campaign"]) -> str:
+def build_theme_url(theme_key: str, keep=("utm_source","utm_medium","utm_campaign")) -> str:
     base = {"theme": theme_key}
     q = current_query_params()
     for k in keep:
         if q.get(k):
             base[k] = q[k]
-    return "?" + "&".join([f"{k}={base[k]}" for k in base])
+    return "?" + "&".join(f"{k}={base[k]}" for k in base)
 
 def is_truthy(x) -> bool:
     return str(x).strip() in ("1","true","True","yes","on")
@@ -88,14 +119,14 @@ def is_truthy(x) -> bool:
 # 日本時間
 JST = timezone(timedelta(hours=9))
 
-# 共通ヘッダー（製造業版・資金繰り版と同一並び）
+# 共通ヘッダー
 COMMON_HEADER_ORDER = [
     "timestamp","company","email","category_scores","total_score","type_label","ai_comment",
     "utm_source","utm_campaign","pdf_url","app_version","status","ai_comment_len",
     "risk_level","entry_check","report_date","theme"
 ]
 
-# ========= ページ設定（※一度だけ） =========
+# ========= 画面設定 =========
 st.set_page_config(
     page_title="3分診断エンジン｜Victor Consulting",
     page_icon="✅",
@@ -117,7 +148,7 @@ except Exception:
     qp = st.experimental_get_query_params()
 ADMIN_MODE = (str(qp.get("admin", ["0"])[0]) == "1") or (str(read_secret("ADMIN_MODE", "0")) == "1")
 
-# ========= ルーティング：ポータル or テーマ =========
+# ========= ルーティング判定 =========
 def theme_exists(theme_key: str) -> bool:
     try:
         return importlib.util.find_spec(f"themes.{theme_key}") is not None
@@ -125,21 +156,32 @@ def theme_exists(theme_key: str) -> bool:
         return False
 
 def get_route() -> dict:
+    """
+    return {"mode": "portal" | "theme", "theme": <slug or None>}
+    """
     q = current_query_params()
     menu_flag = is_truthy(q.get("menu", "0"))
     theme_raw = (q.get("theme", "") or "").strip().lower()
+
     if menu_flag or theme_raw in ("", "portal"):
         return {"mode": "portal", "theme": None}
-    if theme_exists(theme_raw):
+
+    if theme_raw and theme_exists(theme_raw):
         return {"mode": "theme", "theme": theme_raw}
+
+    # 未実装テーマなど → ポータルへ
     return {"mode": "portal", "theme": None}
 
 ROUTE = get_route()
-THEME = ROUTE["theme"]
+THEME = ROUTE["theme"]  # <- 保存時にも使うグローバル定数
 
 # ========= 日本語TTF 登録 =========
 def setup_japanese_font():
-    candidates = ["NotoSansJP-Regular.ttf", "/mnt/data/NotoSansJP-Regular.ttf", "/content/NotoSansJP-Regular.ttf"]
+    candidates = [
+        "NotoSansJP-Regular.ttf",
+        "/mnt/data/NotoSansJP-Regular.ttf",
+        "/content/NotoSansJP-Regular.ttf",
+    ]
     font_path = next((p for p in candidates if os.path.exists(p)), None)
     if not font_path:
         return None
@@ -159,7 +201,83 @@ def setup_japanese_font():
     return font_path
 FONT_PATH_IN_USE = setup_japanese_font()
 
-# ========= ロゴ取得（ポータル/結果で使用） =========
+# ========= 共通スタイル =========
+st.markdown(
+    f"""
+<style>
+.stApp {{
+  background:{BRAND_BG};
+}}
+.block-container {{
+  padding-top: 2.8rem;
+}}
+.result-card {{
+  background: white; border-radius: 14px; padding: 1.0rem 1.0rem;
+  box-shadow: 0 6px 20px rgba(0,0,0,.06); border: 1px solid rgba(0,0,0,.06);
+}}
+.badge {{
+  display:inline-block; padding:.25rem .6rem; border-radius:999px; font-size:.9rem;
+  font-weight:700; letter-spacing:.02em; margin-left:.5rem;
+}}
+.badge-blue  {{ background:#e6f0ff; color:#0b5fff; border:1px solid #cfe3ff; }}
+.badge-yellow{{ background:#fff6d8; color:#8a6d00; border:1px solid #ffecb3; }}
+.badge-red   {{ background:#ffe6e6; color:#a80000; border:1px solid #ffc7c7; }}
+.small-note {{ color:#666; font-size:.9rem; }}
+hr {{ border:none; border-top:1px dotted #c9d7d7; margin:1.0rem 0; }}
+
+/* ポータル用カード */
+.portal-hero {{ text-align:center; padding: 1.2rem 0 0.6rem 0; }}
+.portal-grid {{
+  display:grid; grid-template-columns: repeat( auto-fit, minmax(260px, 1fr) );
+  gap: 18px; margin-top: 14px;
+}}
+.portal-card {{
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-start;
+  min-height:240px;
+  padding:14px 16px;
+  border-radius:16px;
+  background:#ffffff;
+  box-shadow:0 10px 24px rgba(0,0,0,.05);
+  border:1px solid rgba(0,0,0,.08);
+  transition: transform .08s ease, box-shadow .12s ease;
+}}
+.portal-card:hover {{
+  transform: translateY(-2px);
+  box-shadow: 0 16px 30px rgba(0,0,0,.08);
+}}
+.portal-title {{
+  display:inline-block;
+  line-height:1.25;
+  font-weight:800;
+  font-size:1.1rem;
+  margin:.2rem 0 .3rem 0;
+}}
+.portal-lead {{
+  margin:.25rem 0 .75rem;
+  line-height:1.6;
+  color:#333;
+  font-size:.95rem;
+  flex:1;
+}}
+.portal-card .stLinkButton,
+.portal-card .stButton {{
+  margin-top:auto;
+}}
+.card-footer {{
+  display:flex; justify-content:flex-end; margin-top:.6rem;
+}}
+.badge-soon {{
+  display:inline-block; padding:.22rem .55rem; border-radius: 999px;
+  background:#f1f1f1; color:#777; font-size:.80rem; border:1px solid #e5e5e5;
+}}
+</style>
+""",
+    unsafe_allow_html=True
+)
+
+# ========= ロゴ取得 =========
 def path_or_download_logo() -> str | None:
     if os.path.exists(LOGO_LOCAL):
         return LOGO_LOCAL
@@ -167,48 +285,12 @@ def path_or_download_logo() -> str | None:
         r = requests.get(LOGO_URL, timeout=8)
         if r.ok:
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-            tmp.write(r.content); tmp.flush()
+            tmp.write(r.content)
+            tmp.flush()
             return tmp.name
     except Exception:
         pass
     return None
-
-# ========= 共通スタイル注入（f文字列を使わない） =========
-COMMON_CSS = """
-<style>
-.stApp { background: %s; }
-.block-container { padding-top: 2.8rem; }
-h1 { margin-top: .6rem; }
-
-.result-card {
-  background: white; border-radius: 14px; padding: 1.0rem 1.0rem;
-  box-shadow: 0 6px 20px rgba(0,0,0,.06); border: 1px solid rgba(0,0,0,.06);
-}
-.badge { display:inline-block; padding:.25rem .6rem; border-radius:999px; font-size:.9rem;
-  font-weight:700; letter-spacing:.02em; margin-left:.5rem; }
-.badge-blue  { background:#e6f0ff; color:#0b5fff; border:1px solid #cfe3ff; }
-.badge-yellow{ background:#fff6d8; color:#8a6d00; border:1px solid #ffecb3; }
-.badge-red   { background:#ffe6e6; color:#a80000; border:1px solid #ffc7c7; }
-.small-note { color:#666; font-size:.9rem; }
-hr { border:none; border-top:1px dotted #c9d7d7; margin:1.0rem 0; }
-
-/* Portal Cards */
-.portal-card{
-  display:flex; flex-direction:column; justify-content:flex-start;
-  min-height:240px; padding:14px 16px; border-radius:14px; background:#ffffff;
-  box-shadow:0 6px 20px rgba(0,0,0,.06); border:1px solid rgba(0,0,0,.06);
-}
-.portal-title{ display:inline-block; line-height:1.25; }
-.portal-lead{ margin:.25rem 0 .75rem; line-height:1.6; color:#333; font-size:.95rem; flex:1; }
-.portal-card .stLinkButton, .portal-card .stButton{ margin-top:auto; }
-.badge-soon{ display:inline-block; padding:.2rem .6rem; border-radius:999px;
-  background:#fff6d8; color:#8a6d00; border:1px solid #ffecb3; font-weight:700; }
-
-/* Portal layout (hero etc.) */
-.portal-hero { text-align:center; padding: 1.2rem 0 0.6rem 0; }
-</style>
-""" % BRAND_BG
-st.markdown(COMMON_CSS, unsafe_allow_html=True)
 
 # ========= ポータル描画 =========
 def render_portal():
@@ -220,47 +302,40 @@ def render_portal():
         st.markdown("- 3分・無料・数値非公開\n- PDF出力・AIコメント")
         st.caption("© Victor Consulting")
 
-    # ヒーロー
-    PORTAL_TITLE_HTML = "3分診断ポータル<br/> Victor Consulting"
-    st.markdown(f"<div class='portal-hero'><h1 style='line-height:1.25'>{PORTAL_TITLE_HTML}</h1></div>", unsafe_allow_html=True)
+    title_html = "3分診断ポータル<br/>Victor Consulting"
+    st.markdown(
+        f"<div class='portal-hero'><h1 style='line-height:1.25'>{title_html}</h1></div>",
+        unsafe_allow_html=True,
+    )
     st.caption(PORTAL_HERO)
     st.write(PORTAL_LEAD)
 
-    # JSON-LD（SEO：Organization / WebSite）
-    st.markdown(f"""
+    # JSON-LD
+    st.markdown(
+        f"""
 <script type="application/ld+json">
 {json.dumps({
   "@context":"https://schema.org",
   "@type":"WebSite",
   "name":"Victor Consulting 3分診断ポータル",
   "url":"https://victorconsulting.jp/",
-  "publisher": {"@type":"Organization","name":"Victor Consulting","logo":{"@type":"ImageObject","url": LOGO_URL}},
-  "potentialAction": {"@type":"SearchAction","target":"https://victorconsulting.jp/?s={query}","query-input":"required name=query"}
+  "publisher": {
+    "@type":"Organization",
+    "name":"Victor Consulting",
+    "logo": {"@type":"ImageObject","url": LOGO_URL}
+  },
+  "potentialAction": {
+    "@type":"SearchAction",
+    "target":"https://victorconsulting.jp/?s={{query}}",
+    "query-input":"required name=query"
+  }
 }, ensure_ascii=False)}
 </script>
-""", unsafe_allow_html=True)
+""",
+        unsafe_allow_html=True,
+    )
 
-        # カード（3列） — 1回のHTML出力で白箱を解消
-    cols = st.columns(min(3, max(1, len(DIAG_MENU))))
-    for i, item in enumerate(DIAG_MENU):
-        with cols[i % len(cols)]:
-            if item.get("available", True):
-                href = build_theme_url(item["key"])
-                btn_html = f'<a class="vc-btn" href="{href}">この診断を開く →</a>'
-            else:
-                btn_html = '<span class="badge-soon">準備中</span>'
-
-            card_html = f"""
-<div class="portal-card">
-  <h3 style="margin:.2rem 0 .3rem 0;">{item['emoji']} <span class="portal-title">{item['title']}</span></h3>
-  <div class="portal-lead">{item['lead']}</div>
-  <div style="margin-top:auto;">{btn_html}</div>
-</div>
-"""
-            st.markdown(card_html, unsafe_allow_html=True)
-
-
-    # 追加のブランド説明（SEOテキスト）
+    # 追加説明
     with st.expander("Victor Consultingについて / なぜ“3分診断”なのか？"):
         st.markdown("""
 **Victor Consulting** は、中小製造業・サービス業の現場実装に強みを持つ経営コンサルティング・ファームです。  
@@ -273,7 +348,132 @@ def render_portal():
 ご相談は **90分スポット診断** から。継続支援・研修メニューもご用意しています。
 """)
 
-# ========= ルーティング：ポータル優先描画 =========
+    # カードグリッド
+    st.markdown("<div class='portal-grid'>", unsafe_allow_html=True)
+    cols = st.columns(min(3, max(1, len(DIAG_MENU))))
+    for i, item in enumerate(DIAG_MENU):
+        with cols[i % len(cols)]:
+            st.markdown("<div class='portal-card'>", unsafe_allow_html=True)
+            st.markdown(
+                f"### {item['emoji']}  <span class='portal-title'>{item['title']}</span>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div class='portal-lead'>{item['lead']}</div>",
+                unsafe_allow_html=True,
+            )
+
+            if item["available"]:
+                href = build_theme_url(item["key"])
+                st.link_button("この診断を開く →", href)
+            else:
+                st.markdown(
+                    "<div class='card-footer'><span class='badge-soon'>準備中</span></div>",
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ========= イベント記録 =========
+def _report_event(level: str, message: str, payload: dict | None = None):
+    evt = {
+        "timestamp": datetime.now(JST).isoformat(timespec="seconds"),
+        "level": level,
+        "message": message,
+        "payload": json.dumps(payload, ensure_ascii=False) if payload else "",
+    }
+    secret_json     = read_secret("GOOGLE_SERVICE_JSON", None)
+    secret_sheet_id = read_secret("SPREADSHEET_ID", None)
+    wrote = False
+    try:
+        if secret_json and secret_sheet_id:
+            scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+            info = json.loads(secret_json)
+            creds = Credentials.from_service_account_info(info, scopes=scopes)
+            gc = gspread.authorize(creds)
+            sh = gc.open_by_key(secret_sheet_id)
+            try:
+                ws = sh.worksheet("events")
+            except gspread.WorksheetNotFound:
+                ws = sh.add_worksheet(title="events", rows=1000, cols=6)
+                ws.append_row(list(evt.keys()))
+            ws.append_row([evt[k] for k in evt.keys()])
+            wrote = True
+    except Exception:
+        wrote = False
+
+    if not wrote:
+        try:
+            df = pd.DataFrame([evt])
+            csv_path = "events.csv"
+            if os.path.exists(csv_path):
+                df.to_csv(csv_path, mode="a", header=False, index=False, encoding="utf-8")
+            else:
+                df.to_csv(csv_path, index=False, encoding="utf-8")
+        except Exception:
+            pass
+
+    if ADMIN_MODE:
+        st.caption(f"［ADMIN］{level}: {message}")
+
+# ========= 保存系（Sheets/CSV） =========
+def try_append_to_google_sheets(row_dict: dict, spreadsheet_id: str, service_json_str: str, sheet_title: str):
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    info = json.loads(service_json_str)
+    creds = Credentials.from_service_account_info(info, scopes=scopes)
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(spreadsheet_id)
+    try:
+        ws = sh.worksheet(sheet_title)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=sheet_title, rows=2000, cols=30)
+        ws.append_row(COMMON_HEADER_ORDER)
+
+    values = ws.get_all_values()
+    if not values:
+        ws.append_row(COMMON_HEADER_ORDER)
+
+    record = [row_dict.get(k, "") for k in COMMON_HEADER_ORDER]
+    ws.append_row(record, value_input_option="USER_ENTERED")
+
+def fallback_append_to_csv(row_dict: dict, csv_path="responses.csv"):
+    df = pd.DataFrame([row_dict])
+    if os.path.exists(csv_path):
+        df.to_csv(csv_path, mode="a", header=False, index=False, encoding="utf-8")
+    else:
+        df.to_csv(csv_path, index=False, encoding="utf-8")
+
+def auto_save_row(row: dict, theme_sheet: str):
+    """ユーザーには何も表示しない。Sheets→CSVフォールバック。"""
+    secret_json     = read_secret("GOOGLE_SERVICE_JSON", None)
+    if not secret_json:
+        b64 = read_secret("GOOGLE_SERVICE_JSON_BASE64", None)
+        if b64:
+            try:
+                secret_json = base64.b64decode(b64).decode("utf-8")
+            except Exception as e:
+                _report_event("ERROR", f"Base64デコード失敗: {e}", {})
+    secret_sheet_id = read_secret("SPREADSHEET_ID", None)
+
+    def _append_csv():
+        try:
+            fallback_append_to_csv(row)
+        except Exception as e2:
+            _report_event("ERROR", f"CSV保存に失敗: {e2}", {
+                "row_head": {k: row.get(k) for k in list(row)[:6]}
+            })
+
+    try:
+        if secret_json and secret_sheet_id:
+            try_append_to_google_sheets(row, secret_sheet_id, secret_json, sheet_title=theme_sheet)
+        else:
+            _append_csv()
+    except Exception as e:
+        _append_csv()
+        _report_event("WARN", f"Sheets保存に失敗しCSVへフォールバック: {e}", {"reason": str(e)})
+
+# ========= ルーティング：ポータル or テーマ =========
 if ROUTE["mode"] == "portal":
     render_portal()
     st.stop()
@@ -282,7 +482,6 @@ if ROUTE["mode"] == "portal":
 def load_theme_module(theme_name: str):
     return importlib.import_module(f"themes.{theme_name}")
 
-THEME = ROUTE["theme"]
 theme = load_theme_module(THEME)
 
 # ========= サイドバー（共通） =========
@@ -304,7 +503,8 @@ defaults = {
     "main_type": None, "company": "", "email": "",
     "ai_comment": None, "ai_tried": False,
     "utm_source": "", "utm_medium": "", "utm_campaign": "",
-    "saved_once": False, "dedup_key": ""
+    "saved_once": False,
+    "dedup_key": ""
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -406,7 +606,8 @@ def generate_ai_comment(theme_module, company: str, main_type: str, df_scores: p
             return None, f"AIコメント生成でエラー: {e}"
 
 def clamp_comment(text: str, max_chars: int = 520) -> str:
-    if not text: return ""
+    if not text:
+        return ""
     t = " ".join(text.strip().split())
     return t if len(t) <= max_chars else (t[:max_chars - 1] + "…")
 
@@ -422,12 +623,15 @@ def build_bar_png(df: pd.DataFrame) -> bytes:
         from matplotlib import font_manager as fm
         fp = fm.FontProperties(fname=FONT_PATH_IN_USE)
         ax.set_xlabel("平均スコア（0-5）", fontproperties=fp)
-        for label in ax.get_yticklabels(): label.set_fontproperties(fp)
-        for label in ax.get_xticklabels(): label.set_fontproperties(fp)
+        for label in ax.get_yticklabels():
+            label.set_fontproperties(fp)
+        for label in ax.get_xticklabels():
+            label.set_fontproperties(fp)
     buf = io.BytesIO()
     fig.tight_layout()
     fig.savefig(buf, format="png")
-    plt.close(fig); buf.seek(0)
+    plt.close(fig)
+    buf.seek(0)
     return buf.read()
 
 def image_with_max_width(path: str, max_w: int):
@@ -445,7 +649,7 @@ def build_qr_png(data_url: str) -> bytes:
     buf.seek(0)
     return buf.read()
 
-# ========= PDF生成（既存と同じレイアウト） =========
+# ========= PDF生成 =========
 def make_pdf_bytes(result: dict, df_scores: pd.DataFrame, brand_hex=BRAND_BG) -> bytes:
     logo_path = path_or_download_logo()
     bar_png = build_bar_png(df_scores)
@@ -504,7 +708,8 @@ def make_pdf_bytes(result: dict, df_scores: pd.DataFrame, brand_hex=BRAND_BG) ->
     elems.append(Spacer(1, 6))
 
     bar_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    bar_tmp.write(bar_png); bar_tmp.flush()
+    bar_tmp.write(bar_png)
+    bar_tmp.flush()
     elems.append(Paragraph("カテゴリ別スコア（棒グラフ）", h3))
     elems.append(Image(bar_tmp.name, width=390, height=180))
     elems.append(Spacer(1, 6))
@@ -513,7 +718,8 @@ def make_pdf_bytes(result: dict, df_scores: pd.DataFrame, brand_hex=BRAND_BG) ->
     elems.append(Paragraph("次の一手（90分スポット診断のご案内）", h3))
     url_par = Paragraph(f"詳細・お申込み：<u>{CTA_URL}</u>", normal)
     qr_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    qr_tmp.write(qr_png); qr_tmp.flush()
+    qr_tmp.write(qr_png)
+    qr_tmp.flush()
     qr_img = Image(qr_tmp.name, width=52, height=52)
     next_table = Table([[url_par, qr_img]], colWidths=[430, 70])
     nt_style = [("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (1, 0), (1, 0), "RIGHT")]
@@ -546,7 +752,7 @@ if st.session_state.get("result_ready"):
             st.session_state["ai_comment"] = None
             _report_event("WARN", f"AIコメント未生成: {err}", {})
 
-    # UI（既存カードと同一）
+    # UI
     st.markdown("### 診断結果")
     st.markdown(
         f"""
@@ -564,7 +770,7 @@ if st.session_state.get("result_ready"):
         unsafe_allow_html=True
     )
 
-    # 棒グラフ・表（同一仕様）
+    # 棒グラフ・表
     chart = (
         alt.Chart(df)
         .mark_bar()
@@ -587,21 +793,31 @@ if st.session_state.get("result_ready"):
     # PDF
     comment_for_pdf = st.session_state["ai_comment"] or theme.TYPE_TEXT[main_type]
     result_payload = {
-        "company": company, "email": email, "dt": current_time,
-        "signal": signal[0], "main_type": main_type, "comment": comment_for_pdf
+        "company": company,
+        "email": email,
+        "dt": current_time,  # JST
+        "signal": signal[0],
+        "main_type": main_type,
+        "comment": comment_for_pdf
     }
     pdf_bytes = make_pdf_bytes(result_payload, df, brand_hex=BRAND_BG)
     fname = f"VC_診断_{company or '匿名'}_{datetime.now(JST).strftime('%Y%m%d_%H%M')}.pdf"
     st.download_button("📄 PDFをダウンロード", data=pdf_bytes, file_name=fname, mime="application/pdf")
 
     # ======== シート書き込み用データ ========
-    category_scores = {cat: float(df.loc[df["カテゴリ"]==cat,"平均スコア"].values[0]) for cat in df["カテゴリ"].tolist()}
+    category_scores = {
+        cat: float(df.loc[df["カテゴリ"] == cat, "平均スコア"].values[0])
+        for cat in df["カテゴリ"].tolist()
+    }
     category_scores_str = json.dumps(category_scores, ensure_ascii=False)
 
     def to_risk_level(total: float) -> str:
-        if total < 2.0: return "高リスク"
-        elif total < 3.5: return "中リスク"
-        else: return "低リスク"
+        if total < 2.0:
+            return "高リスク"
+        elif total < 3.5:
+            return "中リスク"
+        else:
+            return "低リスク"
 
     pdf_persist_url = ""
     comment_text = st.session_state["ai_comment"] or ""
@@ -629,6 +845,7 @@ if st.session_state.get("result_ready"):
         "theme":       THEME,
     }
 
+    # ▼▼ 二重書き込み防止 ▼▼
     if st.session_state.get("ai_tried") and not st.session_state.get("saved_once"):
         if st.session_state.get("dedup_key"):
             auto_save_row(row, theme_sheet=f"responses_{THEME}")
@@ -636,97 +853,7 @@ if st.session_state.get("result_ready"):
 else:
     st.caption("フォームに回答し、「診断する」を押してください。")
 
-# ========= イベント記録（管理者用） =========
-def _report_event(level: str, message: str, payload: dict | None = None):
-    evt = {
-        "timestamp": datetime.now(JST).isoformat(timespec="seconds"),
-        "level": level, "message": message,
-        "payload": json.dumps(payload, ensure_ascii=False) if payload else ""
-    }
-    secret_json     = read_secret("GOOGLE_SERVICE_JSON", None)
-    secret_sheet_id = read_secret("SPREADSHEET_ID", None)
-    wrote = False
-    try:
-        if secret_json and secret_sheet_id:
-            scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-            info = json.loads(secret_json)
-            creds = Credentials.from_service_account_info(info, scopes=scopes)
-            gc = gspread.authorize(creds)
-            sh = gc.open_by_key(secret_sheet_id)
-            try:
-                ws = sh.worksheet("events")
-            except gspread.WorksheetNotFound:
-                ws = sh.add_worksheet(title="events", rows=1000, cols=6)
-                ws.append_row(list(evt.keys()))
-            ws.append_row([evt[k] for k in evt.keys()])
-            wrote = True
-    except Exception:
-        wrote = False
-    if not wrote:
-        try:
-            df = pd.DataFrame([evt])
-            csv_path = "events.csv"
-            if os.path.exists(csv_path):
-                df.to_csv(csv_path, mode="a", header=False, index=False, encoding="utf-8")
-            else:
-                df.to_csv(csv_path, index=False, encoding="utf-8")
-        except Exception:
-            pass
-    if ADMIN_MODE:
-        st.caption(f"［ADMIN］{level}: {message}")
-
-# ========= 保存系（Sheets/CSV） =========
-def try_append_to_google_sheets(row_dict: dict, spreadsheet_id: str, service_json_str: str, sheet_title: str):
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    info = json.loads(service_json_str)
-    creds = Credentials.from_service_account_info(info, scopes=scopes)
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(spreadsheet_id)
-    try:
-        ws = sh.worksheet(sheet_title)
-    except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title=sheet_title, rows=2000, cols=30)
-        ws.append_row(COMMON_HEADER_ORDER)
-    values = ws.get_all_values()
-    if not values:
-        ws.append_row(COMMON_HEADER_ORDER)
-    record = [row_dict.get(k, "") for k in COMMON_HEADER_ORDER]
-    ws.append_row(record, value_input_option="USER_ENTERED")
-
-def fallback_append_to_csv(row_dict: dict, csv_path="responses.csv"):
-    df = pd.DataFrame([row_dict])
-    if os.path.exists(csv_path):
-        df.to_csv(csv_path, mode="a", header=False, index=False, encoding="utf-8")
-    else:
-        df.to_csv(csv_path, index=False, encoding="utf-8")
-
-def auto_save_row(row: dict, theme_sheet: str):
-    secret_json     = read_secret("GOOGLE_SERVICE_JSON", None)
-    if not secret_json:
-        b64 = read_secret("GOOGLE_SERVICE_JSON_BASE64", None)
-        if b64:
-            try:
-                secret_json = base64.b64decode(b64).decode("utf-8")
-            except Exception as e:
-                _report_event("ERROR", f"Base64デコード失敗: {e}", {})
-    secret_sheet_id = read_secret("SPREADSHEET_ID", None)
-
-    def _append_csv():
-        try:
-            fallback_append_to_csv(row)
-        except Exception as e2:
-            _report_event("ERROR", f"CSV保存に失敗: {e2}", {"row_head": {k: row.get(k) for k in list(row)[:6]}})
-
-    try:
-        if secret_json and secret_sheet_id:
-            try_append_to_google_sheets(row, secret_sheet_id, secret_json, sheet_title=theme_sheet)
-        else:
-            _append_csv()
-    except Exception as e:
-        _append_csv()
-        _report_event("WARN", f"Sheets保存に失敗しCSVへフォールバック: {e}", {"reason": str(e)})
-
-# ========= 管理者UI（任意） =========
+# ========= 管理者UI =========
 if ADMIN_MODE:
     with st.expander("ADMIN：イベントログの確認（最新50件）"):
         secret_json     = read_secret("GOOGLE_SERVICE_JSON", None)
@@ -753,6 +880,7 @@ if ADMIN_MODE:
                 st.dataframe(df_evt, use_container_width=True)
             else:
                 st.info("イベントログはまだありません。")
+
 
 
 
