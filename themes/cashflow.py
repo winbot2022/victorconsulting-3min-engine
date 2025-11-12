@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# 資金繰り改善 3分診断（既存と同一UI/スコア/タイプ判定/AIプロンプト）
+# 資金繰り改善 3分診断（改善版：キー付与・初期値安全化・丸め・型フォールバック等）
 import pandas as pd
 
 THEME_META = {
@@ -7,14 +7,16 @@ THEME_META = {
     "lead":  "**10問**に答えるだけで、資金繰りの“詰まりどころ”を可視化します。"
 }
 
-YN3  = ["Yes", "部分的に", "No"]
-THREE_USUAL = ["いつも", "ときどき", "ほとんどない"]       # 高頻度がリスク高 → 反転マップで処理
-THREE_BANK  = ["ほとんどない", "たまに", "頻繁に"]         # 頻繁が良い → 通常
-THREE_STOCK = ["多くある", "少しある", "ほとんどない"]     # 多いがリスク高 → 反転マップで処理
+# 選択肢
+YN3         = ["Yes", "部分的に", "No"]
+THREE_USUAL = ["いつも", "ときどき", "ほとんどない"]      # 高頻度がリスク高 → 反転マップで処理
+THREE_BANK  = ["ほとんどない", "たまに", "頻繁に"]        # 頻繁が良い → 通常
+THREE_STOCK = ["多くある", "少しある", "ほとんどない"]    # “多い”がリスク高 → 反転マップで処理
 
-MAP_USUAL = {"いつも":1, "ときどき":3, "ほとんどない":5}
-MAP_BANK  = {"ほとんどない":1, "たまに":3, "頻繁に":5}
-MAP_STOCK = {"多くある":1, "少しある":3, "ほとんどない":5}
+# スコアマップ（5が良、1が悪）
+MAP_USUAL = {"いつも": 1, "ときどき": 3, "ほとんどない": 5}
+MAP_BANK  = {"ほとんどない": 1, "たまに": 3, "頻繁に": 5}
+MAP_STOCK = {"多くある": 1, "少しある": 3, "ほとんどない": 5}
 
 TYPE_TEXT = {
     "売上依存型": "売上・入金管理に弱点。請求〜入金のズレや回収管理の甘さが資金を細らせます。入金管理の定点観測と遅延アラート、与信ルールの整備を優先しましょう。",
@@ -25,59 +27,90 @@ TYPE_TEXT = {
     "バランス良好型": "全体バランスは良好。次は資金効率の最大化へ。余剰資金の運用設計、回収・支払条件の最適化でキャッシュ創出力を高めましょう。"
 }
 
-def to_score_yn3(ans: str, invert=False) -> int:
+# --- スコア変換 ---
+def to_score_yn3(ans: str, invert: bool = False) -> int:
     base = {"Yes": 5, "部分的に": 3, "No": 1}
     v = base.get(ans, 3)
-    return {5:1,3:3,1:5}[v] if invert else v
+    return {5: 1, 3: 3, 1: 5}[v] if invert else v
 
-def to_score_map(ans: str, mapping: dict, invert=False) -> int:
+def to_score_map(ans: str, mapping: dict, invert: bool = False) -> int:
     v = mapping.get(ans, 3)
-    return {5:1,3:3,1:5}[v] if invert else v
+    return {5: 1, 3: 3, 1: 5}[v] if invert else v
 
+# 種別指定の薄いユーティリティ（将来の設問追加を簡単に）
+def score(choice, kind: str = "yn3"):
+    if kind == "yn3":       return to_score_yn3(choice)
+    if kind == "yn3_inv":   return to_score_yn3(choice, invert=True)
+    if kind == "usual":     return to_score_map(choice, MAP_USUAL)       # 5が良
+    if kind == "usual_inv": return to_score_map(choice, MAP_USUAL, True) # 反転
+    if kind == "stock":     return to_score_map(choice, MAP_STOCK)       # 5が良
+    if kind == "stock_inv": return to_score_map(choice, MAP_STOCK, True) # 反転
+    if kind == "bank":      return to_score_map(choice, MAP_BANK)        # 5が良
+    return 3
+
+# --- UI（設問） ---
 def render_questions(st):
     st.subheader("① 売上・入金管理")
-    q1 = st.radio("Q1. 得意先からの入金が「少し遅い」と感じることがありますか？", THREE_USUAL, index=1)
-    q2 = st.radio("Q2. 請求書発行から入金までの流れを定期的に点検・改善していますか？", YN3, index=1)
+    q1 = st.radio("Q1. 得意先からの入金が「少し遅い」と感じることがありますか？", THREE_USUAL, index=1, key="cash_q1")
+    q2 = st.radio("Q2. 請求書発行から入金までの流れを定期的に点検・改善していますか？", YN3, index=1, key="cash_q2")
 
     st.subheader("② 支払・仕入管理")
-    q3 = st.radio("Q3. 支払条件（サイト）は自社の資金繰りを考慮して設計できていますか？", YN3, index=1)
-    q4 = st.radio("Q4. 外注費や仕入先への支払予定を月次で見通せていますか？", YN3, index=1)
+    q3 = st.radio("Q3. 支払条件（サイト）は自社の資金繰りを考慮して設計できていますか？", YN3, index=1, key="cash_q3")
+    q4 = st.radio("Q4. 外注費や仕入先への支払予定を月次で見通せていますか？", YN3, index=1, key="cash_q4")
 
     st.subheader("③ 在庫・固定費管理")
-    q5 = st.radio("Q5. 倉庫や事業所に「売れ残り在庫」がありますか？", THREE_STOCK, index=1)
-    q6 = st.radio("Q6. 固定費（家賃・人件費など）を季節変動を加味して予実管理できていますか？", YN3, index=1)
+    q5 = st.radio("Q5. 倉庫や事業所に「売れ残り在庫」がありますか？", THREE_STOCK, index=1, key="cash_q5")
+    q6 = st.radio("Q6. 固定費（家賃・人件費など）を季節変動を加味して予実管理できていますか？", YN3, index=1, key="cash_q6")
 
     st.subheader("④ 借入・金融機関連携")
-    q7 = st.radio("Q7. 銀行とは、どの程度の頻度で連絡を取り合いますか？", THREE_BANK, index=1)
-    q8 = st.radio("Q8. 借入金の返済計画や金利条件を把握し、必要に応じて見直していますか？", YN3, index=1)
+    q7 = st.radio("Q7. 銀行とは、どの程度の頻度で連絡を取り合いますか？", THREE_BANK, index=1, key="cash_q7")
+    q8 = st.radio("Q8. 借入金の返済計画や金利条件を把握し、必要に応じて見直していますか？", YN3, index=1, key="cash_q8")
 
     st.subheader("⑤ 資金繰り管理体制")
-    q9  = st.radio("Q9. 短期の資金繰り表（資金予測）を運用していますか？", YN3, index=2)
-    q10 = st.radio("Q10. 資金不足が見込まれる場合の社内手順（対応ルール）は定めていますか？", YN3, index=1)
+    q9  = st.radio("Q9. 短期の資金繰り表（資金予測）を運用していますか？", YN3, index=2, key="cash_q9")
+    q10 = st.radio("Q10. 資金不足が見込まれる場合の社内手順（対応ルール）は定めていますか？", YN3, index=1, key="cash_q10")
 
     st.markdown("---")
-    company = st.text_input("会社名（必須）", value=st.session_state["company"])
-    email   = st.text_input("メールアドレス（必須）", value=st.session_state["email"])
+    company = st.text_input("会社名（必須）", value=st.session_state.get("company", ""))
+    email   = st.text_input("メールアドレス（必須）", value=st.session_state.get("email", ""))
     st.caption("※ 入力いただいた会社名・メールは診断ログとして保存されます（営業目的以外には利用しません）。")
 
-    sales_scores  = [to_score_map(q1, MAP_USUAL, invert=False), to_score_yn3(q2)]
-    pay_scores    = [to_score_yn3(q3), to_score_yn3(q4)]
-    stock_scores  = [to_score_map(q5, MAP_STOCK, invert=False), to_score_yn3(q6)]
-    bank_scores   = [to_score_map(q7, MAP_BANK, invert=False), to_score_yn3(q8)]
-    sys_scores    = [to_score_yn3(q9), to_score_yn3(q10)]
+    # 各カテゴリの平均スコア（0-5、5が良）
+    sales_scores = [
+        score(q1, "usual"),       # “いつも”が悪 → マップで1,3,5（反転不要：既に低→高）
+        score(q2, "yn3")          # Yes=5 ... No=1
+    ]
+    pay_scores = [
+        score(q3, "yn3"),
+        score(q4, "yn3")
+    ]
+    stock_scores = [
+        score(q5, "stock"),       # “多くある”が悪だが、マップ自体が1,3,5で表現済み
+        score(q6, "yn3")
+    ]
+    bank_scores = [
+        score(q7, "bank"),        # 頻繁が良
+        score(q8, "yn3")
+    ]
+    sys_scores = [
+        score(q9, "yn3"),
+        score(q10, "yn3")
+    ]
 
     df = pd.DataFrame({
-        "カテゴリ": ["売上・入金管理","支払・仕入管理","在庫・固定費管理","借入・金融機関連携","資金繰り管理体制"],
+        "カテゴリ": ["売上・入金管理", "支払・仕入管理", "在庫・固定費管理", "借入・金融機関連携", "資金繰り管理体制"],
         "平均スコア": [
-            sum(sales_scores)/2,
-            sum(pay_scores)/2,
-            sum(stock_scores)/2,
-            sum(bank_scores)/2,
-            sum(sys_scores)/2
+            sum(sales_scores) / len(sales_scores),
+            sum(pay_scores)   / len(pay_scores),
+            sum(stock_scores) / len(stock_scores),
+            sum(bank_scores)  / len(bank_scores),
+            sum(sys_scores)   / len(sys_scores),
         ]
     })
+    df["平均スコア"] = df["平均スコア"].round(2)  # 見た目とPDF出力のブレ防止
     return company, email, df
 
+# --- 集計・タイプ判定 ---
 def evaluate(df_scores: pd.DataFrame):
     overall_avg = df_scores["平均スコア"].mean()
     if overall_avg >= 4.0:
@@ -97,17 +130,21 @@ def evaluate(df_scores: pd.DataFrame):
             "支払・仕入管理": "支払圧迫型",
             "在庫・固定費管理": "在庫・固定費過多型",
             "借入・金融機関連携": "金融連携不足型",
-            "資金繰り管理体制": "体制未整備型"
-        }[cat]
+            "資金繰り管理体制": "体制未整備型",
+        }.get(cat, "体制未整備型")  # フォールバック保険
     return overall_avg, signal, main_type
 
+# --- AIコメント用プロンプト ---
 def build_ai_prompt(company: str, main_type: str, df_scores: pd.DataFrame, overall_avg: float) -> str:
     worst2 = df_scores.sort_values("平均スコア", ascending=True).head(2)["カテゴリ"].tolist()
-    signal = "青" if overall_avg>=4.0 else ("黄" if overall_avg>=2.6 else "赤")
+    signal = "青" if overall_avg >= 4.0 else ("黄" if overall_avg >= 2.6 else "赤")
+    # 推奨強度（生成文の統一感を高めるヒント）
+    strength = {"赤": "強く推奨", "黄": "推奨", "青": "任意"}.get(signal, "推奨")
+
     return f"""
 あなたは資金繰りに強いコンサルタントです。以下の診断結果を受け、経営者向けに約300字（260〜340）で日本語コメントを1段落で作成。
 ・前置きや免責は不要、箇条書き禁止、具体策重視。
-・最後の1文は信号色に応じた強度で「90分スポット診断」への自然な誘導で締める（赤=強く推奨、黄=推奨、青=任意の精緻化）。
+・最後の1文は信号色に応じた強度（{strength}）で「90分スポット診断」への自然な誘導で締める（赤=強く推奨、黄=推奨、青=任意の精緻化）。
 
 [会社名] {company or "（未入力）"}
 [全体平均] {overall_avg:.2f} / 5
@@ -116,3 +153,4 @@ def build_ai_prompt(company: str, main_type: str, df_scores: pd.DataFrame, overa
 [弱点カテゴリTOP2] {", ".join(worst2)}
 [5カテゴリ] {", ".join(df_scores["カテゴリ"].tolist())}
 """.strip()
+
