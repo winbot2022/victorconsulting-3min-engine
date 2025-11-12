@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-# 人材定着 3分診断 v1.1（やさしい日本語版／中小企業向け表現）
+# 人材定着 3分診断 v1.2（やさしい日本語版／中小企業向け表現）
+# - 否定疑問を避ける
+# - 頻度項目は「よくある=1 / ときどきある=3 / ほとんどない=5」（反転なし）
+
 import pandas as pd
 
 THEME_META = {
@@ -97,8 +100,8 @@ def render_questions(st):
     hire_scores   = [to_score_yn3(q1), to_score_yn3(q2)]
     eval_scores   = [to_score_yn3(q3), to_score_yn3(q4)]
     grow_scores   = [to_score_freq3(q5), to_score_yn3(q6)]
-    work_scores   = [to_score_freq3(q7, invert=True), to_score_yn3(q8)]
-    mgmt_scores   = [to_score_freq3(q9, invert=True), to_score_yn3(q10)]
+    work_scores   = [to_score_freq3(q7), to_score_yn3(q8)]   # ← 反転なし
+    mgmt_scores   = [to_score_freq3(q9), to_score_yn3(q10)]  # ← 反転なし
 
     df = pd.DataFrame({
         "カテゴリ": ["採用・受け入れ育成", "評価・成長経路", "育成・成長実感", "働き方・就労条件", "マネジメント・職場風土"],
@@ -130,10 +133,10 @@ def evaluate(df_scores: pd.DataFrame):
         worst_row = df_scores.sort_values("平均スコア").iloc[0]
         cat = worst_row["カテゴリ"]
         main_type = {
-            "採用・受け入れ育成": "採用・受け入れ未整備型",
-            "評価・成長経路":     "評価・成長経路不明型",
-            "育成・成長実感":     "育成停滞型",
-            "働き方・就労条件":   "働き方ミスマッチ型",
+            "採用・受け入れ育成":   "採用・受け入れ未整備型",
+            "評価・成長経路":       "評価・成長経路不明型",
+            "育成・成長実感":       "育成停滞型",
+            "働き方・就労条件":     "働き方ミスマッチ型",
             "マネジメント・職場風土": "マネジメント・風土課題型",
         }.get(cat, "マネジメント・風土課題型")
     return overall_avg, signal, main_type
@@ -147,9 +150,8 @@ def build_ai_prompt(company: str, main_type: str, df_scores: pd.DataFrame, overa
     return f"""
 あなたは人材定着に精通した経営コンサルタントです。以下の診断結果を受け、経営者向けに約300字（260〜340字）で日本語コメントを1段落で作成。
 ・前置きや免責は不要、箇条書き禁止、具体策重視。
-・外来語やカタカナ語（例：メンター、エンゲージメント、モチベーション等）は使わず、現場の人にも伝わる日本語で具体的に書いてください。
+・外来語やカタカナ語（例：メンター、キャリアパス、エンゲージメント、モチベーション等）は使わず、現場の人にも伝わる日本語で具体的に書いてください。
 ・最後の1文は信号色に応じた強度（{strength}）で「90分スポット診断」への自然な誘導で締める（赤=強く推奨、黄=推奨、青=任意の精緻化）。
-・外来語やカタカナ語（例：メンター、キャリアパス、エンゲージメント、モチベーションなど）は使わず、「先輩の支援」「将来の成長の道筋」「職場への愛着」「働く意欲」など日本語に言い換えてください。
 
 [会社名] {company or "（未入力）"}
 [全体平均] {overall_avg:.2f} / 5
@@ -158,4 +160,5 @@ def build_ai_prompt(company: str, main_type: str, df_scores: pd.DataFrame, overa
 [弱点カテゴリTOP2] {", ".join(worst2)}
 [5カテゴリ] {", ".join(df_scores["カテゴリ"].tolist())}
 """.strip()
+
 
