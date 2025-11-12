@@ -337,7 +337,7 @@ def render_portal():
             st.markdown("</div>", unsafe_allow_html=True)
 
     <style>
-    /* グリッド自体は今のままでOK。高さ揃えはカード側で対応 */
+    /* Grid layout is OK. Height controlled by cards */
     .portal-card{
       display:flex;                  /* 縦に並べて */
       flex-direction:column;         /* タイトル→リード→ボタンの順 */
