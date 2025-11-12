@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-# 生産性診断（オフィス業務向け）3分診断 v1.0
+# 生産性診断（オフィス業務向け）3分診断 v1.1
 # - 5カテゴリ×各2問=10問
 # - やさしい日本語／中小企業向け表現
-# - Q7はYesがリスク（反転）, Q8は頻度高いほどリスク（反転）
+# - 否定疑問を避ける／頻度項目は「よくある=1 / ときどき=3 / ほとんどない=5」
+# - Q7/Q8 は頻度3段階（反転なし）
 
 import pandas as pd
 
@@ -12,7 +13,7 @@ THEME_META = {
 }
 
 # 選択肢（5が良、1が悪）
-YN3 = ["Yes", "部分的に", "No"]   # 基本：Yes=5 / 部分的に=3 / No=1
+YN3 = ["Yes", "部分的に", "No"]   # Yes=5 / 部分的に=3 / No=1
 FREQ3_SOFT = ["よくある", "ときどき", "ほとんどない"]  # よくある=1 / ときどき=3 / ほとんどない=5
 
 TYPE_TEXT = {
@@ -73,12 +74,12 @@ def render_questions(st):
     # ④ 時間の使い方・優先順位
     st.subheader("④ 時間の使い方・優先順位")
     q7 = st.radio(
-        "Q7. 社員が本来業務よりも、会議・報告・調整などに時間を取られすぎていませんか？",
-        YN3, index=1, key="prod_off_q7"  # Yes=リスク → 反転採点
+        "Q7. 会議・報告・調整に時間を取られて、本来業務が後回しになることはどの程度ありますか？",
+        FREQ3_SOFT, index=1, key="prod_off_q7"
     )
     q8 = st.radio(
         "Q8. 緊急対応に追われて、計画的に仕事を進められないことがありますか？",
-        FREQ3_SOFT, index=1, key="prod_off_q8"  # 頻度高いほどリスク → 反転採点
+        FREQ3_SOFT, index=1, key="prod_off_q8"
     )
 
     # ⑤ チーム連携・人材活用
@@ -101,7 +102,7 @@ def render_questions(st):
     vis_scores   = [to_score_yn3(q1), to_score_yn3(q2)]
     meet_scores  = [to_score_yn3(q3), to_score_yn3(q4)]
     it_scores    = [to_score_yn3(q5), to_score_yn3(q6)]
-    time_scores  = [to_score_yn3(q7, invert=True), to_score_freq3(q8, invert=True)]
+    time_scores  = [to_score_freq3(q7), to_score_freq3(q8)]  # ← 反転なし
     team_scores  = [to_score_yn3(q9), to_score_yn3(q10)]
 
     df = pd.DataFrame({
@@ -160,3 +161,4 @@ def build_ai_prompt(company: str, main_type: str, df_scores: pd.DataFrame, overa
 [弱点カテゴリTOP2] {", ".join(worst2)}
 [5カテゴリ] {", ".join(df_scores["カテゴリ"].tolist())}
 """.strip()
+
