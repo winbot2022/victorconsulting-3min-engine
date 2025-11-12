@@ -340,7 +340,7 @@ def render_portal():
     /* Grid layout is OK. Height controlled by cards */
     .portal-card{
       display:flex;                  /* 縦に並べて */
-      flex-direction:column;         /* タイトル→リード→ボタンの順 */
+      flex-direction:column;         /* タイトル,リード,ボタンの順 */
       justify-content:flex-start;
       min-height:240px;              /* ★お好みで 220–280 の範囲で調整 */
       padding:14px 16px;
@@ -350,13 +350,13 @@ def render_portal():
       border:1px solid rgba(0,0,0,.06);
     }
     
-    /* リード文は可変。ここを伸ばして“ボタンを下に押し下げる” */
+    /* リード文は可変,ここを伸ばして“ボタンを下に押し下げる” */
     .portal-lead{
       margin:.25rem 0 .75rem;
       line-height:1.6;
       color:#333;
       font-size:.95rem;
-      flex:1;                        /* ★空きはここで吸収 → 高さが揃う */
+      flex:1;                        /* ★空きはここで吸収 , 高さが揃う */
     }
     
     /* ボタン(=link_button)をカード下端に寄せる */
