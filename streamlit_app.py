@@ -235,21 +235,25 @@ def render_portal():
 </script>
 """, unsafe_allow_html=True)
 
-    # カード（3列） — 高さ揃え＆ボタン下寄せ
+        # カード（3列） — 1回のHTML出力で白箱を解消
     cols = st.columns(min(3, max(1, len(DIAG_MENU))))
     for i, item in enumerate(DIAG_MENU):
         with cols[i % len(cols)]:
-            st.markdown("<div class='portal-card'>", unsafe_allow_html=True)
-            st.markdown(
-                f"### {item['emoji']}  <span class='portal-title'>{item['title']}</span>",
-                unsafe_allow_html=True
-            )
-            st.markdown(f"<div class='portal-lead'>{item['lead']}</div>", unsafe_allow_html=True)
             if item.get("available", True):
-                st.link_button("この診断を開く →", build_theme_url(item["key"]))
+                href = build_theme_url(item["key"])
+                btn_html = f'<a class="vc-btn" href="{href}">この診断を開く →</a>'
             else:
-                st.markdown("<div class='card-footer'><span class='badge-soon'>準備中</span></div>", unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
+                btn_html = '<span class="badge-soon">準備中</span>'
+
+            card_html = f"""
+<div class="portal-card">
+  <h3 style="margin:.2rem 0 .3rem 0;">{item['emoji']} <span class="portal-title">{item['title']}</span></h3>
+  <div class="portal-lead">{item['lead']}</div>
+  <div style="margin-top:auto;">{btn_html}</div>
+</div>
+"""
+            st.markdown(card_html, unsafe_allow_html=True)
+
 
     # 追加のブランド説明（SEOテキスト）
     with st.expander("Victor Consultingについて / なぜ“3分診断”なのか？"):
