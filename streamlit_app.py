@@ -230,6 +230,19 @@ hr {{ border:none; border-top:1px dotted #c9d7d7; margin:1.0rem 0; }}
   text-align:center; padding: 1.2rem 0 0.6rem 0;
 }}
 
+/* ポータルサブタイトル */
+.portal-subtitle{
+    font-size:1.5rem;
+    font-weight:700;
+    color:#111;
+    text-align:center;
+    margin-top:0.2rem;
+    margin-bottom:1rem;
+}
+.portal-subtitle span{
+    color:#005bbb;
+}
+
 /* ポータル：グリッド ＋ カード全体リンク */
 .portal-grid {{
   display:grid;
