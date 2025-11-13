@@ -202,15 +202,15 @@ def setup_japanese_font():
 FONT_PATH_IN_USE = setup_japanese_font()
 
 # ========= 共通スタイル =========
+# ========= スタイル（ポータル＋診断結果） =========
 st.markdown(
     f"""
 <style>
-.stApp {{
-  background:{BRAND_BG};
-}}
-.block-container {{
-  padding-top: 2.8rem;
-}}
+.stApp {{ background: {BRAND_BG}; }}
+.block-container {{ padding-top: 2.8rem; }}
+h1 {{ margin-top: .6rem; }}
+
+/* 診断結果カード（既存） */
 .result-card {{
   background: white; border-radius: 14px; padding: 1.0rem 1.0rem;
   box-shadow: 0 6px 20px rgba(0,0,0,.06); border: 1px solid rgba(0,0,0,.06);
@@ -225,74 +225,90 @@ st.markdown(
 .small-note {{ color:#666; font-size:.9rem; }}
 hr {{ border:none; border-top:1px dotted #c9d7d7; margin:1.0rem 0; }}
 
-/* ポータル用カード */
-.portal-hero {{ text-align:center; padding: 1.2rem 0 0.6rem 0; }}
-.portal-grid {{
-  display:grid; grid-template-columns: repeat( auto-fit, minmax(260px, 1fr) );
-  gap: 18px; margin-top: 14px;
+/* ポータル：ヒーロー */
+.portal-hero {{
+  text-align:center; padding: 1.2rem 0 0.6rem 0;
 }}
 
-/* ★ カード全体を囲むリンク */
+/* ポータル：グリッド ＋ カード全体リンク */
+.portal-grid {{
+  display:grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px;
+  margin-top: 18px;
+}}
 .portal-card-link {{
   text-decoration:none;
   color:inherit;
   display:block;
+  height:100%;
 }}
 
+/* ポータル：カード本体（3Dボタン風） */
 .portal-card {{
+  position:relative;
   display:flex;
   flex-direction:column;
   justify-content:flex-start;
+  height:100%;
   min-height:240px;
-  padding:14px 16px;
-  border-radius:16px;
+  padding:16px 18px;
+  border-radius:18px;
   background:#ffffff;
-  box-shadow:0 10px 24px rgba(0,0,0,.05);
-  border:1px solid rgba(0,0,0,.08);
-  transition: transform .08s ease, box-shadow .12s ease;
+  box-shadow:0 10px 24px rgba(15,23,42,.06);
+  border:1px solid rgba(15,23,42,.06);
+  transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
 }}
 .portal-card:hover {{
-  transform: translateY(-2px);
-  box-shadow: 0 16px 30px rgba(0,0,0,.08);
+  transform: translateY(-4px);
+  box-shadow:0 18px 36px rgba(15,23,42,.10);
+  border-color:#2563eb;
 }}
+
+/* 1行目：アイコン */
+.portal-icon {{
+  font-size:1.8rem;
+  margin-bottom:.3rem;
+}}
+
+/* 2〜3行目：タイトル */
 .portal-title {{
-  display:inline-block;
-  line-height:1.25;
   font-weight:800;
   font-size:1.1rem;
-  margin:.2rem 0 .3rem 0;
+  margin:0 0 .35rem 0;
+  line-height:1.4;
 }}
+
+/* 本文（リード） */
 .portal-lead {{
-  margin:.25rem 0 .75rem;
+  margin:.25rem 0 .9rem;
   line-height:1.6;
-  color:#333;
+  color:#374151;
   font-size:.95rem;
   flex:1;
 }}
 
-/* CTA テキスト */
+/* フッター（「この診断を開く →」表示） */
+.card-footer {{
+  display:flex;
+  justify-content:flex-end;
+  margin-top:auto;
+}}
 .portal-cta {{
-  font-weight:700;
   font-size:.9rem;
+  font-weight:700;
   color:#0b5fff;
 }}
 
-.portal-card .stLinkButton,
-.portal-card .stButton {{
-  margin-top:auto;
-}}
-.card-footer {{
-  display:flex; justify-content:flex-end; margin-top:.6rem;
-}}
+/* 準備中バッジ */
 .badge-soon {{
-  display:inline-block; padding:.22rem .55rem; border-radius: 999px;
-  background:#f1f1f1; color:#777; font-size:.80rem; border:1px solid #e5e5e5;
+  display:inline-block; padding:.2rem .6rem; border-radius:999px;
+  background:#fff6d8; color:#8a6d00; border:1px solid #ffecb3; font-weight:700;
 }}
 </style>
 """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
-
 
 # ========= ロゴ取得 =========
 def path_or_download_logo() -> str | None:
@@ -311,6 +327,7 @@ def path_or_download_logo() -> str | None:
 
 # ========= ポータル描画 =========
 def render_portal():
+    # サイドバー
     with st.sidebar:
         logo_path = path_or_download_logo()
         if logo_path:
@@ -319,7 +336,7 @@ def render_portal():
         st.markdown("- 3分・無料・数値非公開\n- PDF出力・AIコメント")
         st.caption("© Victor Consulting")
 
-    # タイトル
+    # ヒーロー
     title_html = "3分診断ポータル<br/>Victor Consulting"
     st.markdown(
         f"<div class='portal-hero'><h1 style='line-height:1.25'>{title_html}</h1></div>",
@@ -328,7 +345,7 @@ def render_portal():
     st.caption(PORTAL_HERO)
     st.write(PORTAL_LEAD)
 
-    # JSON-LD
+    # JSON-LD（SEO）
     st.markdown(
         f"""
 <script type="application/ld+json">
@@ -353,7 +370,7 @@ def render_portal():
         unsafe_allow_html=True,
     )
 
-    # 説明テキスト
+    # 追加説明（そのまま）
     with st.expander("Victor Consultingについて / なぜ“3分診断”なのか？"):
         st.markdown("""
 **Victor Consulting** は、中小製造業・サービス業の現場実装に強みを持つ経営コンサルティング・ファームです。  
@@ -366,41 +383,41 @@ def render_portal():
 ご相談は **90分スポット診断** から。継続支援・研修メニューもご用意しています。
 """)
 
-    # ▼ カードグリッド（カード全体がリンク）
-    st.markdown("<div class='portal-grid'>", unsafe_allow_html=True)
-    cols = st.columns(min(3, max(1, len(DIAG_MENU))))
-
-    for i, item in enumerate(DIAG_MENU):
-        with cols[i % len(cols)]:
-            if item["available"]:
-                href = build_theme_url(item["key"])
-                safe_href = href.replace("&", "&amp;")
-                card_inner = f"""
-<div class="portal-card">
-  <h3>{item['emoji']}  <span class="portal-title">{item['title']}</span></h3>
-  <div class="portal-lead">{item['lead']}</div>
-  <div class="card-footer">
-    <span class="portal-cta">この診断を開く →</span>
+    # ▼ カードグリッド（全部 HTML で出力）
+    cards_html = []
+    for item in DIAG_MENU:
+        if item["available"]:
+            href = build_theme_url(item["key"])
+            safe_href = href.replace("&", "&amp;")
+            card_html = f"""
+<a class="portal-card-link" href="{safe_href}">
+  <div class="portal-card">
+    <div class="portal-icon">{item['emoji']}</div>
+    <h3 class="portal-title">{item['title']}</h3>
+    <div class="portal-lead">{item['lead']}</div>
+    <div class="card-footer">
+      <span class="portal-cta">この診断を開く →</span>
+    </div>
   </div>
-</div>
+</a>
 """
-                html = f'<a class="portal-card-link" href="{safe_href}">{card_inner}</a>'
-            else:
-                card_inner = f"""
+        else:
+            card_html = f"""
 <div class="portal-card">
-  <h3>{item['emoji']}  <span class="portal-title">{item['title']}</span></h3>
+  <div class="portal-icon">{item['emoji']}</div>
+  <h3 class="portal-title">{item['title']}</h3>
   <div class="portal-lead">{item['lead']}</div>
   <div class="card-footer">
     <span class="badge-soon">準備中</span>
   </div>
 </div>
 """
-                html = card_inner
+        cards_html.append(card_html)
 
-            st.markdown(html, unsafe_allow_html=True)
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
+    st.markdown(
+        "<div class='portal-grid'>" + "\n".join(cards_html) + "</div>",
+        unsafe_allow_html=True,
+    )
 
 # ========= イベント記録 =========
 def _report_event(level: str, message: str, payload: dict | None = None):
