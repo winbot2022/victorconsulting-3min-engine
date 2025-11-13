@@ -323,15 +323,6 @@ hr {{ border:none; border-top:1px dotted #c9d7d7; margin:1.0rem 0; }}
     unsafe_allow_html=True,
 )
 
-st.markdown(
-    """
-    <div class='portal-subtitle'>
-        会社の <span>“ボトルネック”</span> を、3分で見える化
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
 # ========= ロゴ取得 =========
 def path_or_download_logo() -> str | None:
     if os.path.exists(LOGO_LOCAL):
@@ -349,7 +340,14 @@ def path_or_download_logo() -> str | None:
 
 # ========= ポータル描画 =========
 def render_portal():
-    # サイドバー
+    # ページ設定
+    st.set_page_config(
+        page_title=PORTAL_TITLE,
+        page_icon="✅",
+        layout="centered",
+        initial_sidebar_state="expanded"
+    )
+
     with st.sidebar:
         logo_path = path_or_download_logo()
         if logo_path:
@@ -358,39 +356,28 @@ def render_portal():
         st.markdown("- 3分・無料・数値非公開\n- PDF出力・AIコメント")
         st.caption("© Victor Consulting")
 
-    # ヒーロー
-    title_html = "3分診断ポータル<br/>Victor Consulting"
+    # タイトル（1行目）
+    PORTAL_TITLE_HTML = "3分診断ポータル<br/> Victor Consulting"
     st.markdown(
-        f"<div class='portal-hero'><h1 style='line-height:1.25'>{title_html}</h1></div>",
-        unsafe_allow_html=True,
+        f"<div class='portal-hero'><h1 style='line-height:1.25'>{PORTAL_TITLE_HTML}</h1></div>",
+        unsafe_allow_html=True
     )
-    st.caption(PORTAL_HERO)
-    st.write(PORTAL_LEAD)
 
-    # JSON-LD（SEO）
+    # ★ ここに強調サブタイトルを追加（caption/write は使わない）
     st.markdown(
-        f"""
-<script type="application/ld+json">
-{json.dumps({
-  "@context":"https://schema.org",
-  "@type":"WebSite",
-  "name":"Victor Consulting 3分診断ポータル",
-  "url":"https://victorconsulting.jp/",
-  "publisher": {
-    "@type":"Organization",
-    "name":"Victor Consulting",
-    "logo": {"@type":"ImageObject","url": LOGO_URL}
-  },
-  "potentialAction": {
-    "@type":"SearchAction",
-    "target":"https://victorconsulting.jp/?s={{query}}",
-    "query-input":"required name=query"
-  }
-}, ensure_ascii=False)}
-</script>
-""",
+        """
+        <div class="portal-subtitle">
+            会社の <span>“ボトルネック”</span> を、3分で見える化
+        </div>
+        """,
         unsafe_allow_html=True,
     )
+
+    # もし PORTAL_HERO / PORTAL_LEAD をまだ使いたければ、
+    # その下で caption / write にしてもOK
+    # st.caption(PORTAL_HERO)
+    # st.write(PORTAL_LEAD)
+
 
     # 追加説明（そのまま）
     with st.expander("Victor Consultingについて / なぜ“3分診断”なのか？"):
