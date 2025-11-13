@@ -204,6 +204,15 @@ FONT_PATH_IN_USE = setup_japanese_font()
 # ========= 共通スタイル =========
 # ========= スタイル（ポータル＋診断結果） =========
 st.markdown(
+    """
+    <div class='portal-subtitle'>
+        会社の <span>“ボトルネック”</span> を、3分で見える化
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+st.markdown(
     f"""
 <style>
 .stApp {{ background: {BRAND_BG}; }}
