@@ -322,7 +322,7 @@ hr {{ border:none; border-top:1px dotted #c9d7d7; margin:1.0rem 0; }}
 """,
     unsafe_allow_html=True,
 )
-/* 追加 */
+
 st.markdown(
     """
     <div class='portal-subtitle'>
