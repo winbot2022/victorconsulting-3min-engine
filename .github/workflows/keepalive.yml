@@ -2,15 +2,35 @@ name: Keep Streamlit App Warm
 
 on:
   schedule:
-    #30分おきに実行（UTC 0時・12時 → JST 9時・21時）
-    - cron: "*/30 * * * *"
+    # 毎日2回、12時間ごとに実行（Streamlitのスリープ間隔を考慮）
+    # ※最初はテストのため、cron: '0 */1 * * *' (1時間ごと) で試すことを推奨
+    - cron: '0 */1 * * *' 
   workflow_dispatch:
 
 jobs:
-  ping:
+  commit:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Curl Streamlit app (3min-engine)
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # 【必須設定】リポジトリへの書き込み権限を持つPATトークンを使用
+          token: ${{ secrets.GH_PAT_TOKEN }} 
+          
+      - name: Create and Commit Ping File
         run: |
-          curl -sS "https://victorconsulting-3min-engine-ybr9nvztte9wuhajxf4fgg.streamlit.app/" > /dev/null
+          # タイムスタンプをファイルに書き込み、リポジトリに「変更」を生成
+          echo "Streamlit Ping for 3min-engine: $(date +%Y-%m-%d\ %H:%M:%S)" > .streamlit_ping_log
+          
+          # Gitユーザーを設定
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          
+          # 変更をステージング
+          git add .streamlit_ping_log
+          
+          # コミット実行
+          git commit -m "Automated Streamlit keep-awake push for 3min-engine"
+          
+          # プッシュ実行
+          git push
